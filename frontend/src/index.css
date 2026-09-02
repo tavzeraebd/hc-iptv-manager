@@ -1,0 +1,148 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Paleta AMOLED (baseada na escala Tailwind) — pedida pelo usuário via
+   screenshot/paleta-cores. Fundo #000000 (economia de bateria + contraste
+   máximo em telas Super AMOLED), superfícies em zinc, acento laranja
+   (orange-500) no lugar do antigo indigo. Aplicada no app inteiro (player E
+   dashboard admin) — o dashboard puxa os tokens semânticos abaixo (.dark),
+   que também apontam pra esta paleta.
+   - player-bg      → fundo (black)
+   - player-surface → cards/hover/divisores (zinc-800; mantido nesse tom, e
+     não zinc-900, pra que os muitos usos com opacidade — /20 /25 /40 —
+     continuem legíveis sobre o preto)
+   - player-fg      → texto principal (zinc-100) */
+@theme {
+  --color-player-bg: #000000;
+  --color-player-surface: #27272a;
+  --color-player-fg: #f4f4f5;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* Sem bordas arredondadas em lugar nenhum do projeto — os quatro tokens de
+     raio ficam zerados direto (não como calc a partir de --radius) porque
+     calc(0 - 4px) daria um valor negativo, que é inválido em border-radius. */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+}
+
+:root {
+  --radius: 0rem;
+  --background: var(--color-gray-50);
+  --foreground: var(--color-gray-900);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--color-gray-900);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--color-gray-900);
+  --primary: var(--color-orange-600);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: var(--color-gray-100);
+  --secondary-foreground: var(--color-gray-900);
+  --muted: var(--color-gray-100);
+  --muted-foreground: var(--color-gray-500);
+  --accent: var(--color-orange-50);
+  --accent-foreground: var(--color-orange-900);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.98 0 0);
+  --success: oklch(0.62 0.17 145);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.77 0.16 85);
+  --warning-foreground: oklch(0.2 0.05 85);
+  --border: var(--color-gray-200);
+  --input: var(--color-gray-200);
+  --ring: var(--color-orange-600);
+}
+
+.dark {
+  /* Paleta AMOLED (screenshot/paleta-cores) no app inteiro — player E
+     dashboard admin. Fundo black, superfícies zinc-900/zinc-800, acento
+     laranja (orange-500: CTA/seleção/progresso/foco). Vermelho (red-500)
+     entra só como destrutivo/erro. */
+  --background: #000000;
+  --foreground: #f4f4f5;
+  --card: #18181b;
+  --card-foreground: #f4f4f5;
+  --popover: #18181b;
+  --popover-foreground: #f4f4f5;
+  --primary: var(--color-orange-500);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: #27272a;
+  --secondary-foreground: #f4f4f5;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: color-mix(in srgb, var(--color-orange-500) 15%, #000000);
+  --accent-foreground: var(--color-orange-200);
+  --destructive: #ef4444;
+  --destructive-foreground: oklch(1 0 0);
+  --success: #10b981;
+  --success-foreground: oklch(0.14 0.02 160);
+  --warning: #f59e0b;
+  --warning-foreground: oklch(0.16 0.03 70);
+  --border: #27272a;
+  --input: #27272a;
+  --ring: var(--color-orange-500);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+    font-synthesis: none;
+  }
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+.status-dot-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot-pulse {
+    animation: none;
+  }
+}

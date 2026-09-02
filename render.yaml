@@ -1,0 +1,23 @@
+# render.yaml — portal do IPTV Manager (alternativa ao Fly)
+# New > Blueprint no dashboard do Render, aponta pro repo, e defina os 3
+# secrets quando pedir. Plano free DORME após ~15 min sem tráfego — na prática
+# o heartbeat do Player (a cada 20s) mantém acordado, mas se todos os Players
+# ficarem off há um cold start (~50s) no próximo. Fly evita isso.
+
+services:
+  - type: web
+    name: iptv-manager-portal
+    runtime: node
+    plan: free
+    region: oregon           # Render free não tem região no BR
+    rootDir: backend         # repo = a pasta IPTV_Manager/
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: PORTAL_ADMIN_TOKEN
+        sync: false
