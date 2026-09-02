@@ -23589,28 +23589,31 @@ async function sbUpsertFromHeartbeat(input) {
   if (!mac) throw new Error("MAC inv\xE1lido.");
   const sb = await getSupabase();
   const now = Date.now();
-  const existing = await sbFindDevice(mac);
-  if (!existing) {
-    const row = {
-      mac,
-      name: (input.name ?? "").trim(),
-      model: (input.model ?? "").trim(),
-      platform: (input.platform ?? "").trim(),
-      first_seen_at: now,
-      last_seen_at: now,
-      status: "pending"
-    };
-    const { error: error2 } = await sb.from(TABLE2).insert(row);
-    if (error2) throw new Error(error2.message);
-    return rowToDevice({ ...row, bound_server_id: null });
-  }
-  const patch = { last_seen_at: now };
-  if (input.name != null && input.name.trim()) patch.name = input.name.trim();
-  if (input.model != null && input.model.trim()) patch.model = input.model.trim();
-  if (input.platform != null && input.platform.trim()) patch.platform = input.platform.trim();
-  const { data, error } = await sb.from(TABLE2).update(patch).eq("mac", mac).select("*").maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? rowToDevice(data) : existing;
+  const meta = { last_seen_at: now };
+  if (input.name != null && input.name.trim()) meta.name = input.name.trim();
+  if (input.model != null && input.model.trim()) meta.model = input.model.trim();
+  if (input.platform != null && input.platform.trim()) meta.platform = input.platform.trim();
+  const upd = await sb.from(TABLE2).update(meta).eq("mac", mac).select("*").maybeSingle();
+  if (upd.error) throw new Error(upd.error.message);
+  if (upd.data) return rowToDevice(upd.data);
+  const insertRow = {
+    mac,
+    name: (input.name ?? "").trim(),
+    model: (input.model ?? "").trim(),
+    platform: (input.platform ?? "").trim(),
+    first_seen_at: now,
+    last_seen_at: now,
+    status: "pending"
+  };
+  const ins = await sb.from(TABLE2).insert(insertRow).select("*").maybeSingle();
+  if (!ins.error && ins.data) return rowToDevice(ins.data);
+  if (ins.error && ins.error.code !== "23505") throw new Error(ins.error.message);
+  const again = await sb.from(TABLE2).update(meta).eq("mac", mac).select("*").maybeSingle();
+  if (again.error) throw new Error(again.error.message);
+  if (again.data) return rowToDevice(again.data);
+  const found = await sbFindDevice(mac);
+  if (found) return found;
+  throw new Error("N\xE3o foi poss\xEDvel registrar o dispositivo.");
 }
 async function sbUpdateDevice(mac, patch) {
   const norm = normalizeMac(mac);
@@ -23629,8 +23632,8 @@ async function sbUpdateDevice(mac, patch) {
       status: "pending"
     };
     const { error: error2 } = await sb.from(TABLE2).insert(base);
-    if (error2) throw new Error(error2.message);
-    existing = rowToDevice({ ...base, bound_server_id: null });
+    if (error2 && error2.code !== "23505") throw new Error(error2.message);
+    existing = await sbFindDevice(norm) ?? rowToDevice({ ...base, bound_server_id: null });
   }
   const upd = {};
   if (patch.name != null) upd.name = patch.name.trim();
@@ -23836,6 +23839,13 @@ var init_server = __esm({
     HOST = process.env.HOST || "0.0.0.0";
     app.use((0, import_cors.default)());
     app.use(import_express3.default.json({ limit: "100kb" }));
+    app.get("/healthz", (_req, res) => {
+      res.json({
+        ok: true,
+        storage: supabaseEnabled() ? "supabase" : "file",
+        tokenRequired: portalTokenConfigured()
+      });
+    });
     app.use("/api", (req, res, next) => {
       const isHeartbeat = req.method === "POST" && /(^|\/)devices\/heartbeat\/?$/.test(req.path);
       if (isHeartbeat) {

@@ -245,35 +245,41 @@ async function sbUpsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
   if (!mac) throw new Error("MAC inválido.");
   const sb = await getSupabase();
   const now = Date.now();
-  const existing = await sbFindDevice(mac);
 
-  if (!existing) {
-    const row = {
-      mac,
-      name: (input.name ?? "").trim(),
-      model: (input.model ?? "").trim(),
-      platform: (input.platform ?? "").trim(),
-      first_seen_at: now,
-      last_seen_at: now,
-      status: "pending" as const,
-    };
-    const { error } = await sb.from(TABLE).insert(row);
-    if (error) throw new Error(error.message);
-    return rowToDevice({ ...row, bound_server_id: null });
-  }
+  // Metadados que o heartbeat pode mexer — NUNCA status/boundServerId.
+  const meta: Record<string, unknown> = { last_seen_at: now };
+  if (input.name != null && input.name.trim()) meta.name = input.name.trim();
+  if (input.model != null && input.model.trim()) meta.model = input.model.trim();
+  if (input.platform != null && input.platform.trim()) meta.platform = input.platform.trim();
 
-  const patch: Record<string, unknown> = { last_seen_at: now };
-  if (input.name != null && input.name.trim()) patch.name = input.name.trim();
-  if (input.model != null && input.model.trim()) patch.model = input.model.trim();
-  if (input.platform != null && input.platform.trim()) patch.platform = input.platform.trim();
-  const { data, error } = await sb
-    .from(TABLE)
-    .update(patch)
-    .eq("mac", mac)
-    .select("*")
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? rowToDevice(data as DeviceRow) : existing;
+  // 1) tenta ATUALIZAR um registro existente (caminho comum; idempotente,
+  //    então heartbeats concorrentes depois do 1º não se atropelam).
+  const upd = await sb.from(TABLE).update(meta).eq("mac", mac).select("*").maybeSingle();
+  if (upd.error) throw new Error(upd.error.message);
+  if (upd.data) return rowToDevice(upd.data as DeviceRow);
+
+  // 2) não existe -> INSERE como pending.
+  const insertRow = {
+    mac,
+    name: (input.name ?? "").trim(),
+    model: (input.model ?? "").trim(),
+    platform: (input.platform ?? "").trim(),
+    first_seen_at: now,
+    last_seen_at: now,
+    status: "pending" as const,
+  };
+  const ins = await sb.from(TABLE).insert(insertRow).select("*").maybeSingle();
+  if (!ins.error && ins.data) return rowToDevice(ins.data as DeviceRow);
+  // 23505 = unique_violation: outro heartbeat inseriu no meio -> re-atualiza.
+  if (ins.error && ins.error.code !== "23505") throw new Error(ins.error.message);
+
+  const again = await sb.from(TABLE).update(meta).eq("mac", mac).select("*").maybeSingle();
+  if (again.error) throw new Error(again.error.message);
+  if (again.data) return rowToDevice(again.data as DeviceRow);
+
+  const found = await sbFindDevice(mac);
+  if (found) return found;
+  throw new Error("Não foi possível registrar o dispositivo.");
 }
 
 async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Device | null> {
@@ -294,8 +300,9 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
       status: "pending" as const,
     };
     const { error } = await sb.from(TABLE).insert(base);
-    if (error) throw new Error(error.message);
-    existing = rowToDevice({ ...base, bound_server_id: null });
+    // 23505: corrida com um heartbeat — o registro já existe, segue o baile.
+    if (error && error.code !== "23505") throw new Error(error.message);
+    existing = (await sbFindDevice(norm)) ?? rowToDevice({ ...base, bound_server_id: null });
   }
 
   const upd: Record<string, unknown> = {};
