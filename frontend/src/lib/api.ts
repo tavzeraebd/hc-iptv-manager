@@ -184,6 +184,8 @@ export async function importUsers(
 // ---------------------------------------------------------------------------
 
 export type DeviceStatus = "pending" | "active" | "disabled";
+/** Estado efetivo (status + validade) calculado pelo portal. */
+export type DeviceAccess = "pending" | "active" | "disabled" | "expired";
 
 export interface PortalDevice {
   mac: string;
@@ -191,15 +193,24 @@ export interface PortalDevice {
   model: string;
   platform: string;
   status: DeviceStatus;
+  access: DeviceAccess;
   boundServerId: string | null;
   firstSeenAt: number;
   lastSeenAt: number;
+  /** Validade do acesso (epoch ms). null = sem validade (vitalício). */
+  expiresAt: number | null;
 }
 
 export interface DevicePatch {
   name?: string;
   boundServerId?: string | null;
   status?: DeviceStatus;
+  /** Validade absoluta: número (epoch ms) | null (vitalício) | undefined (não mexe). */
+  expiresAt?: number | null;
+  /** Renova somando dias à validade atual (se válida) ou a partir de agora. */
+  extendDays?: number;
+  /** Dias de validade a aplicar ao ativar sem prazo (default 30). */
+  validityDays?: number;
 }
 
 export async function fetchDevices(): Promise<PortalDevice[]> {

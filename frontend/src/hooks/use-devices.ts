@@ -44,6 +44,13 @@ export function useDevices(enabled: boolean) {
   const bind = useCallback((mac: string, boundServerId: string | null) => patch(mac, { boundServerId }), [patch]);
   const rename = useCallback((mac: string, name: string) => patch(mac, { name }), [patch]);
   const setStatus = useCallback((mac: string, status: DeviceStatus) => patch(mac, { status }), [patch]);
+  /** Renova somando dias à validade atual (se válida) ou a partir de agora. */
+  const extend = useCallback((mac: string, days: number) => patch(mac, { extendDays: days }), [patch]);
+  /** Define a validade absoluta. `null` = vitalício (sem validade). */
+  const setExpiry = useCallback(
+    (mac: string, expiresAt: number | null) => patch(mac, { expiresAt }),
+    [patch]
+  );
 
   const remove = useCallback(async (mac: string) => {
     await apiDeleteDevice(mac);
@@ -60,5 +67,5 @@ export function useDevices(enabled: boolean) {
     return () => clearInterval(id);
   }, [enabled, reload]);
 
-  return { devices, loading, error, reload, patch, bind, rename, setStatus, remove };
+  return { devices, loading, error, reload, patch, bind, rename, setStatus, extend, setExpiry, remove };
 }

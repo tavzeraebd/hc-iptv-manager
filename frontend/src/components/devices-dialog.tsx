@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
-import { Check, Loader2, MonitorSmartphone, Plus, Power, RotateCw, Trash2, X } from "lucide-react";
+import {
+  CalendarClock,
+  Check,
+  Infinity as InfinityIcon,
+  Loader2,
+  MonitorSmartphone,
+  Plus,
+  Power,
+  RotateCw,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +32,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useDevices } from "@/hooks/use-devices";
-import { getDevice, updateDevice, type DeviceStatus, type PortalDevice } from "@/lib/api";
+import {
+  getDevice,
+  updateDevice,
+  type DeviceAccess,
+  type DeviceStatus,
+  type PortalDevice,
+} from "@/lib/api";
 import type { IptvUserWithCheck } from "@/lib/types";
 
 interface DevicesDialogProps {
@@ -33,11 +50,17 @@ interface DevicesDialogProps {
 }
 
 const NONE = "__none__";
+const DAY = 86_400_000;
+const DEFAULT_DAYS = 30;
 
-const STATUS_META: Record<DeviceStatus, { label: string; variant: "success" | "warning" | "destructive" }> = {
+const ACCESS_META: Record<
+  DeviceAccess,
+  { label: string; variant: "success" | "warning" | "destructive" }
+> = {
   active: { label: "ATIVO", variant: "success" },
   pending: { label: "PENDENTE", variant: "warning" },
   disabled: { label: "DESATIVADO", variant: "destructive" },
+  expired: { label: "EXPIRADO", variant: "destructive" },
 };
 
 function relTime(ts: number): string {
@@ -49,8 +72,44 @@ function relTime(ts: number): string {
   return `há ${Math.floor(s / 86400)} d`;
 }
 
+function fmtDate(ts: number): string {
+  return new Date(ts).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+// "válido até 10/10/2026 · faltam 28 dias" | "expirou em 01/09/2026 · há 3 dias"
+function validityLabel(expiresAt: number | null): string {
+  if (expiresAt == null) return "Sem validade (vitalício)";
+  const diffDays = Math.round((expiresAt - Date.now()) / DAY);
+  if (diffDays >= 0) {
+    return `Válido até ${fmtDate(expiresAt)} · ${
+      diffDays === 0 ? "vence hoje" : `faltam ${diffDays} dia${diffDays === 1 ? "" : "s"}`
+    }`;
+  }
+  const ago = -diffDays;
+  return `Expirou em ${fmtDate(expiresAt)} · há ${ago} dia${ago === 1 ? "" : "s"}`;
+}
+
+// input[type=date] usa "YYYY-MM-DD" no fuso local
+function toDateInput(ts: number | null): string {
+  if (ts == null) return "";
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function fromDateInput(v: string): number | null {
+  if (!v) return null;
+  // fim do dia local, pra "válido até DD" incluir o dia inteiro
+  const d = new Date(`${v}T23:59:59`);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
 export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }: DevicesDialogProps) {
-  const { devices, loading, error, reload, bind, rename, setStatus, remove, patch } = useDevices(open);
+  const { devices, loading, error, reload, bind, rename, setStatus, extend, setExpiry, remove, patch } =
+    useDevices(open);
 
   const serverLabel = useMemo(() => {
     const m = new Map<string, string>();
@@ -67,7 +126,7 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
           </DialogTitle>
           <DialogDescription>
             Cada aparelho do IPTV Player se anuncia aqui pelo MAC. Vincule um servidor e ative para
-            liberar o acesso — o app baixa a lista sozinho.
+            liberar o acesso — o app baixa a lista sozinho e perde o acesso quando a validade vence.
           </DialogDescription>
         </DialogHeader>
 
@@ -107,7 +166,19 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
               onStatus={(s) => setStatus(d.mac, s).catch((e) => toast.error(String(e)))}
               onActivate={() =>
                 patch(d.mac, { status: "active" })
-                  .then(() => toast.success("Dispositivo liberado."))
+                  .then(() => toast.success(`Liberado por ${DEFAULT_DAYS} dias.`))
+                  .catch((e) => toast.error(String(e)))
+              }
+              onExtend={(days) =>
+                extend(d.mac, days)
+                  .then((u) => toast.success(`Renovado — válido até ${fmtDate(u.expiresAt ?? Date.now())}.`))
+                  .catch((e) => toast.error(String(e)))
+              }
+              onSetExpiry={(ts) =>
+                setExpiry(d.mac, ts)
+                  .then(() =>
+                    toast.success(ts == null ? "Marcado como vitalício." : `Validade: ${fmtDate(ts)}.`)
+                  )
                   .catch((e) => toast.error(String(e)))
               }
               onRemove={() =>
@@ -135,6 +206,7 @@ function AddDeviceForm({
   const [mac, setMac] = useState("");
   const [name, setName] = useState("");
   const [serverId, setServerId] = useState<string>(preselectServerId ?? NONE);
+  const [days, setDays] = useState<string>(String(DEFAULT_DAYS));
   const [lookup, setLookup] = useState<PortalDevice | null>(null);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -144,6 +216,7 @@ function AddDeviceForm({
   }, [preselectServerId]);
 
   const macValid = /^[0-9a-fA-F]{12}$/.test(mac.replace(/[^0-9a-fA-F]/g, ""));
+  const willLiberate = serverId !== NONE;
 
   const doLookup = async () => {
     if (!macValid) return;
@@ -165,16 +238,23 @@ function AddDeviceForm({
     }
     setSaving(true);
     try {
+      const n = Number(days);
       await updateDevice(mac, {
         name: name.trim() || undefined,
-        boundServerId: serverId === NONE ? null : serverId,
-        status: serverId === NONE ? "pending" : "active",
+        boundServerId: willLiberate ? serverId : null,
+        status: willLiberate ? "active" : "pending",
+        validityDays: willLiberate && n > 0 ? n : undefined,
       });
-      toast.success(serverId === NONE ? "Dispositivo cadastrado." : "Dispositivo cadastrado e liberado.");
+      toast.success(
+        willLiberate
+          ? `Cadastrado e liberado por ${Number(days) > 0 ? days : DEFAULT_DAYS} dias.`
+          : "Dispositivo cadastrado."
+      );
       setMac("");
       setName("");
       setLookup(null);
       setServerId(preselectServerId ?? NONE);
+      setDays(String(DEFAULT_DAYS));
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao cadastrar.");
@@ -247,9 +327,23 @@ function AddDeviceForm({
             </SelectContent>
           </Select>
         </div>
+        {willLiberate && (
+          <div className="w-full sm:w-28">
+            <Label htmlFor="dev-days" className="text-xs">
+              Validade (dias)
+            </Label>
+            <Input
+              id="dev-days"
+              type="number"
+              min={1}
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+            />
+          </div>
+        )}
         <Button type="submit" disabled={saving || !macValid}>
           {saving ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-          {serverId === NONE ? "Cadastrar" : "Cadastrar e liberar"}
+          {willLiberate ? "Cadastrar e liberar" : "Cadastrar"}
         </Button>
       </div>
     </form>
@@ -264,6 +358,8 @@ function DeviceRow({
   onRename,
   onStatus,
   onActivate,
+  onExtend,
+  onSetExpiry,
   onRemove,
 }: {
   device: PortalDevice;
@@ -273,11 +369,18 @@ function DeviceRow({
   onRename: (name: string) => void;
   onStatus: (s: DeviceStatus) => void;
   onActivate: () => void;
+  onExtend: (days: number) => void;
+  onSetExpiry: (ts: number | null) => void;
   onRemove: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(device.name);
-  const meta = STATUS_META[device.status];
+  const [dateDraft, setDateDraft] = useState(toDateInput(device.expiresAt));
+  const meta = ACCESS_META[device.access];
+
+  useEffect(() => setDateDraft(toDateInput(device.expiresAt)), [device.expiresAt]);
+
+  const showValidity = device.status !== "pending";
 
   return (
     <div className="flex flex-col gap-2 p-3 text-sm">
@@ -356,6 +459,53 @@ function DeviceRow({
           <Trash2 className="size-4" />
         </Button>
       </div>
+
+      {showValidity && (
+        <div className="mt-1 flex flex-col gap-2 rounded-md border bg-muted/20 p-2">
+          <div className="flex items-center gap-1.5 text-xs">
+            <CalendarClock className="size-3.5 shrink-0 text-muted-foreground" />
+            <span
+              className={
+                device.access === "expired" ? "font-medium text-destructive" : "text-muted-foreground"
+              }
+            >
+              {validityLabel(device.expiresAt)}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onExtend(7)}>
+              +7d
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onExtend(30)}>
+              +30d
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onExtend(365)}>
+              +1 ano
+            </Button>
+            <Input
+              type="date"
+              value={dateDraft}
+              onChange={(e) => setDateDraft(e.target.value)}
+              onBlur={() => {
+                const ts = fromDateInput(dateDraft);
+                if (ts !== device.expiresAt) onSetExpiry(ts);
+              }}
+              className="h-7 w-[9.5rem] px-2 text-xs"
+            />
+            {device.expiresAt != null && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={() => onSetExpiry(null)}
+                title="Remover validade (vitalício)"
+              >
+                <InfinityIcon className="size-3.5" /> sem validade
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

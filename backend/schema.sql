@@ -25,8 +25,12 @@ create table if not exists public.devices (
   last_seen_at    bigint not null default 0,
   status          text not null default 'pending'
                     check (status in ('pending', 'active', 'disabled')),
-  bound_server_id uuid references public.iptv_users(id) on delete set null
+  bound_server_id uuid references public.iptv_users(id) on delete set null,
+  -- validade do acesso (epoch ms). NULL = sem validade (vitalício).
+  expires_at      bigint
 );
+-- para bancos criados antes da coluna de validade:
+alter table public.devices add column if not exists expires_at bigint;
 
 create index if not exists devices_last_seen_idx on public.devices (last_seen_at desc);
 

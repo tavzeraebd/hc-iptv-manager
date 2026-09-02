@@ -14,8 +14,12 @@ import { supabaseEnabled, getSupabase } from "./db/supabase";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "..", "data");
 const DATA_FILE = path.join(DATA_DIR, "devices.txt");
 const TABLE = "devices";
+const DAY_MS = 86_400_000;
+const DEFAULT_VALIDITY_DAYS = 30;
 
 export type DeviceStatus = "pending" | "active" | "disabled";
+/** Estado efetivo de acesso (status + validade). */
+export type DeviceAccess = "pending" | "active" | "disabled" | "expired";
 
 export interface Device {
   mac: string;
@@ -27,6 +31,8 @@ export interface Device {
   status: DeviceStatus;
   /** id de uma entrada de usuarios.txt (ver storage.ts). */
   boundServerId?: string;
+  /** Validade do acesso (epoch ms). null = sem validade (vitalício). */
+  expiresAt: number | null;
 }
 
 export interface HeartbeatInput {
@@ -40,6 +46,12 @@ export interface DeviceAdminPatch {
   name?: string;
   boundServerId?: string | null;
   status?: DeviceStatus;
+  /** Define a validade absoluta. `null` = vitalício. `undefined` = não mexe. */
+  expiresAt?: number | null;
+  /** Renova: soma dias à validade atual (se ainda válida) ou a partir de agora. */
+  extendDays?: number;
+  /** Dias de validade padrão ao ativar sem prazo definido (default 30). */
+  defaultValidityDays?: number;
 }
 
 // AA:BB:CC:DD:EE:FF maiúsculo. Aceita entrada com "-" ou "." ou sem separador.
@@ -52,6 +64,41 @@ export function normalizeMac(raw: unknown): string | null {
 
 function coerceStatus(v: unknown): DeviceStatus {
   return v === "active" || v === "disabled" ? v : "pending";
+}
+
+/** Acesso expirou? (só relevante quando status === "active") */
+export function isExpired(d: Device, now = Date.now()): boolean {
+  return d.expiresAt != null && d.expiresAt <= now;
+}
+
+/** Estado efetivo: pending / disabled / expired / active. */
+export function accessOf(d: Device, now = Date.now()): DeviceAccess {
+  if (d.status === "disabled") return "disabled";
+  if (d.status === "pending") return "pending";
+  return isExpired(d, now) ? "expired" : "active";
+}
+
+// Resolve a nova validade a partir do patch. Retorna `undefined` para "não
+// mexer", `null` para "vitalício", ou um epoch ms.
+function resolveExpiry(
+  current: number | null,
+  patch: DeviceAdminPatch,
+  now: number
+): number | null | undefined {
+  if (patch.expiresAt !== undefined) return patch.expiresAt; // explícito (número ou null)
+  if (patch.extendDays && patch.extendDays > 0) {
+    const base = current != null && current > now ? current : now;
+    return base + patch.extendDays * DAY_MS;
+  }
+  // Ativando sem prazo atual válido -> aplica o padrão (30 dias).
+  if (patch.status === "active" && (current == null || current <= now)) {
+    const days =
+      patch.defaultValidityDays && patch.defaultValidityDays > 0
+        ? patch.defaultValidityDays
+        : DEFAULT_VALIDITY_DAYS;
+    return now + days * DAY_MS;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +130,7 @@ function parseLine(line: string): Device | null {
       lastSeenAt: typeof p.lastSeenAt === "number" ? p.lastSeenAt : Date.now(),
       status: coerceStatus(p.status),
       boundServerId: typeof p.boundServerId === "string" ? p.boundServerId : undefined,
+      expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null,
     };
   } catch {
     return null;
@@ -127,6 +175,7 @@ async function fileUpsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
       firstSeenAt: now,
       lastSeenAt: now,
       status: "pending",
+      expiresAt: null,
     };
     devices.push(created);
     await fileWriteDevices(devices);
@@ -163,6 +212,7 @@ async function fileUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<D
       firstSeenAt: now,
       lastSeenAt: 0,
       status: "pending",
+      expiresAt: null,
     });
     idx = devices.length - 1;
   }
@@ -178,6 +228,8 @@ async function fileUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<D
   } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
     next.boundServerId = patch.boundServerId;
   }
+  const resolvedExp = resolveExpiry(cur.expiresAt, patch, now);
+  if (resolvedExp !== undefined) next.expiresAt = resolvedExp;
   devices[idx] = next;
   await fileWriteDevices(devices);
   return next;
@@ -206,6 +258,7 @@ interface DeviceRow {
   last_seen_at: number | string | null;
   status: string | null;
   bound_server_id: string | null;
+  expires_at: number | string | null;
 }
 
 function rowToDevice(r: DeviceRow): Device {
@@ -218,6 +271,7 @@ function rowToDevice(r: DeviceRow): Device {
     lastSeenAt: Number(r.last_seen_at) || 0,
     status: coerceStatus(r.status),
     boundServerId: r.bound_server_id ?? undefined,
+    expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
   };
 }
 
@@ -302,7 +356,9 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
     const { error } = await sb.from(TABLE).insert(base);
     // 23505: corrida com um heartbeat — o registro já existe, segue o baile.
     if (error && error.code !== "23505") throw new Error(error.message);
-    existing = (await sbFindDevice(norm)) ?? rowToDevice({ ...base, bound_server_id: null });
+    existing =
+      (await sbFindDevice(norm)) ??
+      rowToDevice({ ...base, bound_server_id: null, expires_at: null });
   }
 
   const upd: Record<string, unknown> = {};
@@ -315,6 +371,8 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
   } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
     upd.bound_server_id = patch.boundServerId;
   }
+  const resolvedExp = resolveExpiry(existing.expiresAt, patch, now);
+  if (resolvedExp !== undefined) upd.expires_at = resolvedExp;
   if (Object.keys(upd).length === 0) return existing;
 
   const { data, error } = await sb

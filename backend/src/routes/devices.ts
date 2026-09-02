@@ -7,13 +7,15 @@ import {
   updateDevice,
   deleteDevice,
   normalizeMac,
+  accessOf,
+  isExpired,
   type Device,
 } from "../deviceStore";
 
 const router = Router();
 
-// Monta a resposta pública do device + (quando liberado) as credenciais do
-// servidor vinculado, pra o Player conectar sozinho.
+// Monta a resposta pública do device + (quando liberado E dentro da validade)
+// as credenciais do servidor vinculado, pra o Player conectar sozinho.
 async function withServer(device: Device) {
   const base = {
     mac: device.mac,
@@ -21,11 +23,13 @@ async function withServer(device: Device) {
     model: device.model,
     platform: device.platform,
     status: device.status,
+    access: accessOf(device),
     boundServerId: device.boundServerId ?? null,
     firstSeenAt: device.firstSeenAt,
     lastSeenAt: device.lastSeenAt,
+    expiresAt: device.expiresAt,
   };
-  if (device.status !== "active" || !device.boundServerId) {
+  if (device.status !== "active" || !device.boundServerId || isExpired(device)) {
     return { ...base, server: null as null };
   }
   const user = await findUser(device.boundServerId);
@@ -60,11 +64,15 @@ router.post("/devices/heartbeat", async (req: Request, res: Response) => {
 });
 
 // --- usados pelo Manager ----------------------------------------------------
+function withAccess(d: Device) {
+  return { ...d, boundServerId: d.boundServerId ?? null, access: accessOf(d) };
+}
+
 router.get("/devices", async (_req: Request, res: Response) => {
   try {
     const devices = await readDevices();
     devices.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
-    res.json(devices);
+    res.json(devices.map(withAccess));
   } catch {
     res.status(500).json({ error: "Não foi possível carregar os dispositivos." });
   }
@@ -76,7 +84,7 @@ router.get("/devices/:mac", async (req: Request, res: Response) => {
     res.status(404).json({ error: "Dispositivo não encontrado." });
     return;
   }
-  res.json(device);
+  res.json(withAccess(device));
 });
 
 router.put("/devices/:mac", async (req: Request, res: Response) => {
@@ -104,13 +112,31 @@ router.put("/devices/:mac", async (req: Request, res: Response) => {
       ? body.status
       : undefined;
 
+  // Validade: `expiresAt` absoluto (número | null p/ vitalício | undefined = não mexe);
+  // `extendDays` renova somando dias; `validityDays` = padrão ao ativar.
+  let expiresAt: number | null | undefined;
+  if (body.expiresAt === null) {
+    expiresAt = null;
+  } else if (typeof body.expiresAt === "number" && Number.isFinite(body.expiresAt)) {
+    expiresAt = body.expiresAt;
+  }
+  const extendDays =
+    typeof body.extendDays === "number" && body.extendDays > 0 ? body.extendDays : undefined;
+  const defaultValidityDays =
+    typeof body.validityDays === "number" && body.validityDays > 0
+      ? body.validityDays
+      : undefined;
+
   try {
     const updated = await updateDevice(mac, {
       name: typeof body.name === "string" ? body.name : undefined,
       boundServerId,
       status,
+      expiresAt,
+      extendDays,
+      defaultValidityDays,
     });
-    res.json(updated);
+    res.json(updated ? withAccess(updated) : updated);
   } catch {
     res.status(500).json({ error: "Erro ao atualizar o dispositivo." });
   }

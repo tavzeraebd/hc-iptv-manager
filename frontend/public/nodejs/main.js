@@ -23437,6 +23437,26 @@ function normalizeMac(raw) {
 function coerceStatus(v) {
   return v === "active" || v === "disabled" ? v : "pending";
 }
+function isExpired(d, now = Date.now()) {
+  return d.expiresAt != null && d.expiresAt <= now;
+}
+function accessOf(d, now = Date.now()) {
+  if (d.status === "disabled") return "disabled";
+  if (d.status === "pending") return "pending";
+  return isExpired(d, now) ? "expired" : "active";
+}
+function resolveExpiry(current, patch, now) {
+  if (patch.expiresAt !== void 0) return patch.expiresAt;
+  if (patch.extendDays && patch.extendDays > 0) {
+    const base = current != null && current > now ? current : now;
+    return base + patch.extendDays * DAY_MS;
+  }
+  if (patch.status === "active" && (current == null || current <= now)) {
+    const days = patch.defaultValidityDays && patch.defaultValidityDays > 0 ? patch.defaultValidityDays : DEFAULT_VALIDITY_DAYS;
+    return now + days * DAY_MS;
+  }
+  return void 0;
+}
 async function ensureDataFile2() {
   await import_fs2.promises.mkdir(DATA_DIR2, { recursive: true });
   try {
@@ -23460,7 +23480,8 @@ function parseLine2(line) {
       firstSeenAt: typeof p.firstSeenAt === "number" ? p.firstSeenAt : Date.now(),
       lastSeenAt: typeof p.lastSeenAt === "number" ? p.lastSeenAt : Date.now(),
       status: coerceStatus(p.status),
-      boundServerId: typeof p.boundServerId === "string" ? p.boundServerId : void 0
+      boundServerId: typeof p.boundServerId === "string" ? p.boundServerId : void 0,
+      expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null
     };
   } catch {
     return null;
@@ -23498,7 +23519,8 @@ async function fileUpsertFromHeartbeat(input) {
       platform: (input.platform ?? "").trim(),
       firstSeenAt: now,
       lastSeenAt: now,
-      status: "pending"
+      status: "pending",
+      expiresAt: null
     };
     devices.push(created);
     await fileWriteDevices(devices);
@@ -23530,7 +23552,8 @@ async function fileUpdateDevice(mac, patch) {
       platform: "",
       firstSeenAt: now,
       lastSeenAt: 0,
-      status: "pending"
+      status: "pending",
+      expiresAt: null
     });
     idx = devices.length - 1;
   }
@@ -23545,6 +23568,8 @@ async function fileUpdateDevice(mac, patch) {
   } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
     next.boundServerId = patch.boundServerId;
   }
+  const resolvedExp = resolveExpiry(cur.expiresAt, patch, now);
+  if (resolvedExp !== void 0) next.expiresAt = resolvedExp;
   devices[idx] = next;
   await fileWriteDevices(devices);
   return next;
@@ -23567,7 +23592,8 @@ function rowToDevice(r) {
     firstSeenAt: Number(r.first_seen_at) || Date.now(),
     lastSeenAt: Number(r.last_seen_at) || 0,
     status: coerceStatus(r.status),
-    boundServerId: r.bound_server_id ?? void 0
+    boundServerId: r.bound_server_id ?? void 0,
+    expiresAt: r.expires_at != null ? Number(r.expires_at) : null
   };
 }
 async function sbReadDevices() {
@@ -23633,7 +23659,7 @@ async function sbUpdateDevice(mac, patch) {
     };
     const { error: error2 } = await sb.from(TABLE2).insert(base);
     if (error2 && error2.code !== "23505") throw new Error(error2.message);
-    existing = await sbFindDevice(norm) ?? rowToDevice({ ...base, bound_server_id: null });
+    existing = await sbFindDevice(norm) ?? rowToDevice({ ...base, bound_server_id: null, expires_at: null });
   }
   const upd = {};
   if (patch.name != null) upd.name = patch.name.trim();
@@ -23645,6 +23671,8 @@ async function sbUpdateDevice(mac, patch) {
   } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
     upd.bound_server_id = patch.boundServerId;
   }
+  const resolvedExp = resolveExpiry(existing.expiresAt, patch, now);
+  if (resolvedExp !== void 0) upd.expires_at = resolvedExp;
   if (Object.keys(upd).length === 0) return existing;
   const { data, error } = await sb.from(TABLE2).update(upd).eq("mac", norm).select("*").maybeSingle();
   if (error) throw new Error(error.message);
@@ -23673,7 +23701,7 @@ function updateDevice(mac, patch) {
 function deleteDevice(mac) {
   return supabaseEnabled() ? sbDeleteDevice(mac) : fileDeleteDevice(mac);
 }
-var import_fs2, import_path2, DATA_DIR2, DATA_FILE2, TABLE2;
+var import_fs2, import_path2, DATA_DIR2, DATA_FILE2, TABLE2, DAY_MS, DEFAULT_VALIDITY_DAYS;
 var init_deviceStore = __esm({
   "src/deviceStore.ts"() {
     "use strict";
@@ -23683,6 +23711,8 @@ var init_deviceStore = __esm({
     DATA_DIR2 = process.env.DATA_DIR || import_path2.default.join(__dirname, "..", "..", "data");
     DATA_FILE2 = import_path2.default.join(DATA_DIR2, "devices.txt");
     TABLE2 = "devices";
+    DAY_MS = 864e5;
+    DEFAULT_VALIDITY_DAYS = 30;
   }
 });
 
@@ -23694,11 +23724,13 @@ async function withServer(device) {
     model: device.model,
     platform: device.platform,
     status: device.status,
+    access: accessOf(device),
     boundServerId: device.boundServerId ?? null,
     firstSeenAt: device.firstSeenAt,
-    lastSeenAt: device.lastSeenAt
+    lastSeenAt: device.lastSeenAt,
+    expiresAt: device.expiresAt
   };
-  if (device.status !== "active" || !device.boundServerId) {
+  if (device.status !== "active" || !device.boundServerId || isExpired(device)) {
     return { ...base, server: null };
   }
   const user = await findUser(device.boundServerId);
@@ -23707,6 +23739,9 @@ async function withServer(device) {
     ...base,
     server: { host: user.host, username: user.username, password: user.password }
   };
+}
+function withAccess(d) {
+  return { ...d, boundServerId: d.boundServerId ?? null, access: accessOf(d) };
 }
 var import_express2, router2, devices_default;
 var init_devices = __esm({
@@ -23741,7 +23776,7 @@ var init_devices = __esm({
       try {
         const devices = await readDevices();
         devices.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
-        res.json(devices);
+        res.json(devices.map(withAccess));
       } catch {
         res.status(500).json({ error: "N\xE3o foi poss\xEDvel carregar os dispositivos." });
       }
@@ -23752,7 +23787,7 @@ var init_devices = __esm({
         res.status(404).json({ error: "Dispositivo n\xE3o encontrado." });
         return;
       }
-      res.json(device);
+      res.json(withAccess(device));
     });
     router2.put("/devices/:mac", async (req, res) => {
       const mac = normalizeMac(req.params.mac);
@@ -23773,13 +23808,24 @@ var init_devices = __esm({
         boundServerId = body.boundServerId;
       }
       const status = body.status === "pending" || body.status === "active" || body.status === "disabled" ? body.status : void 0;
+      let expiresAt;
+      if (body.expiresAt === null) {
+        expiresAt = null;
+      } else if (typeof body.expiresAt === "number" && Number.isFinite(body.expiresAt)) {
+        expiresAt = body.expiresAt;
+      }
+      const extendDays = typeof body.extendDays === "number" && body.extendDays > 0 ? body.extendDays : void 0;
+      const defaultValidityDays = typeof body.validityDays === "number" && body.validityDays > 0 ? body.validityDays : void 0;
       try {
         const updated = await updateDevice(mac, {
           name: typeof body.name === "string" ? body.name : void 0,
           boundServerId,
-          status
+          status,
+          expiresAt,
+          extendDays,
+          defaultValidityDays
         });
-        res.json(updated);
+        res.json(updated ? withAccess(updated) : updated);
       } catch {
         res.status(500).json({ error: "Erro ao atualizar o dispositivo." });
       }
