@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { Nodejs } from "@capawesome/capacitor-nodejs";
 import type { CheckResult, IptvUser } from "./types";
+import { BAKED_PORTAL_URL, BAKED_PORTAL_TOKEN } from "./baked-config";
 
 // No app Android o próprio backend Node/Express roda embarcado no processo
 // do app (nodejs-mobile via @capawesome/capacitor-nodejs), escutando em
@@ -10,12 +11,19 @@ import type { CheckResult, IptvUser } from "./types";
 // externo (PC, VPS, ou o próprio celular via Termux) usando a tela de
 // configurações — a escolha fica salva localmente e tem prioridade sobre o
 // backend embarcado.
-const EMBEDDED_BACKEND_URL = "http://127.0.0.1:8891";
+export const EMBEDDED_BACKEND_URL = "http://127.0.0.1:8891";
 const SERVER_URL_STORAGE_KEY = "iptv-manager-server-url";
 const PORTAL_TOKEN_STORAGE_KEY = "iptv-manager-portal-token";
 
+// Por padrão o app já aponta para o portal hospedado (URL embutida e ofuscada
+// em baked-config). Um valor salvo em ⚙ Endereço do servidor tem prioridade;
+// "Voltar a usar o backend embarcado" grava EMBEDDED_BACKEND_URL explicitamente.
 export function getServerUrl(): string {
-  return localStorage.getItem(SERVER_URL_STORAGE_KEY) || EMBEDDED_BACKEND_URL;
+  return (
+    localStorage.getItem(SERVER_URL_STORAGE_KEY) ||
+    BAKED_PORTAL_URL ||
+    EMBEDDED_BACKEND_URL
+  );
 }
 
 export function setServerUrl(url: string): void {
@@ -32,9 +40,9 @@ export function setServerUrl(url: string): void {
 // PORTAL_ADMIN_TOKEN não é definida lá), então mandar o header é inofensivo.
 export function getPortalToken(): string {
   try {
-    return localStorage.getItem(PORTAL_TOKEN_STORAGE_KEY) || "";
+    return localStorage.getItem(PORTAL_TOKEN_STORAGE_KEY) || BAKED_PORTAL_TOKEN;
   } catch {
-    return "";
+    return BAKED_PORTAL_TOKEN;
   }
 }
 

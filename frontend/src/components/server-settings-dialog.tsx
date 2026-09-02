@@ -17,6 +17,7 @@ import {
   usesEmbeddedBackend,
   getPortalToken,
   setPortalToken,
+  EMBEDDED_BACKEND_URL,
 } from "@/lib/api";
 
 interface ServerSettingsDialogProps {
@@ -52,7 +53,7 @@ export function ServerSettingsDialog({ open, onOpenChange, onSaved }: ServerSett
   };
 
   const handleUseEmbedded = () => {
-    setServerUrl("");
+    setServerUrl(EMBEDDED_BACKEND_URL);
     setPortalToken(token);
     onOpenChange(false);
     onSaved();

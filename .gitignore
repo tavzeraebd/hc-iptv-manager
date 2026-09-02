@@ -26,6 +26,10 @@ frontend/android/keystore/
 .env.*
 !.env.example
 
+# config embutida do portal (URL + token de admin ofuscados) — fora do repo
+# porque o token guarda a API; use baked-config.example.ts como base
+frontend/src/lib/baked-config.ts
+
 # misc
 *.log
 .DS_Store
