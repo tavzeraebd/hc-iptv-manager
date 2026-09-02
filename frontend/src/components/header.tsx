@@ -1,5 +1,5 @@
 import { Capacitor } from "@capacitor/core";
-import { Download, Lock, MonitorSmartphone, Moon, Plus, RefreshCw, Settings, Sun, SatelliteDish } from "lucide-react";
+import { CreditCard, Download, Lock, MonitorSmartphone, Moon, Plus, RefreshCw, Settings, Sun, SatelliteDish } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -35,6 +35,7 @@ interface HeaderProps {
   onToggleTheme: () => void;
   onOpenServerSettings: () => void;
   onOpenDevices: () => void;
+  onOpenRenewal: () => void;
   onLock: () => void;
 }
 
@@ -51,6 +52,7 @@ export function Header({
   onToggleTheme,
   onOpenServerSettings,
   onOpenDevices,
+  onOpenRenewal,
   onLock,
 }: HeaderProps) {
   return (
@@ -104,6 +106,15 @@ export function Header({
               </Button>
             </TooltipTrigger>
             <TooltipContent>Dispositivos</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="icon" onClick={onOpenRenewal}>
+                <CreditCard />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Pagamento / renovação</TooltipContent>
           </Tooltip>
 
           <Tooltip>

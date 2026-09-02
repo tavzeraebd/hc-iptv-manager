@@ -239,3 +239,49 @@ export async function deleteDevice(mac: string): Promise<void> {
   const res = await apiFetch(`/devices/${encodeURIComponent(mac)}`, { method: "DELETE" });
   return handle(res);
 }
+
+// ---------------------------------------------------------------------------
+// Renovação / pagamento (PIX via Mercado Pago) — config editável do portal.
+// ---------------------------------------------------------------------------
+
+export interface RenewalSettings {
+  priceCents: number;
+  months: number;
+  qrTtlMin: number;
+  promoPriceCents: number | null;
+  promoUntil: number | null;
+  effectivePriceCents: number;
+  providerConfigured: boolean;
+}
+
+export type RenewalSettingsPatch = Partial<
+  Pick<RenewalSettings, "priceCents" | "months" | "qrTtlMin" | "promoPriceCents" | "promoUntil">
+>;
+
+export async function getRenewalSettings(): Promise<RenewalSettings> {
+  const res = await apiFetch("/settings/renewal", { cache: "no-store" });
+  return handle<RenewalSettings>(res);
+}
+
+export async function updateRenewalSettings(patch: RenewalSettingsPatch): Promise<RenewalSettings> {
+  const res = await apiFetch("/settings/renewal", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return handle<RenewalSettings>(res);
+}
+
+export interface DevicePayment {
+  id: string;
+  status: "pending" | "paid" | "expired" | "error" | "cancelled";
+  amountCents: number;
+  months: number;
+  createdAt: number;
+  paidAt: number | null;
+}
+
+export async function fetchDevicePayments(mac: string): Promise<DevicePayment[]> {
+  const res = await apiFetch(`/devices/${encodeURIComponent(mac)}/payments`, { cache: "no-store" });
+  return handle<DevicePayment[]>(res);
+}

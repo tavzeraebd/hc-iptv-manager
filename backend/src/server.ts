@@ -4,8 +4,10 @@ import path from "path";
 import fs from "fs";
 import usersRouter from "./routes/users";
 import devicesRouter from "./routes/devices";
+import paymentsRouter from "./routes/payments";
 import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
+import { mpConfigured } from "./mercadopago";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -27,13 +29,18 @@ app.get("/healthz", (_req: Request, res: Response) => {
   });
 });
 
-// O Player só chama POST /api/devices/heartbeat e não tem token — essa rota
-// fica pública. Todo o resto da API passa pelo guard de token (no-op quando
-// PORTAL_ADMIN_TOKEN não está definido, como no backend embarcado do APK).
+// Rotas que o Player / o Mercado Pago chamam SEM token de admin. Todo o resto
+// da API passa pelo guard (no-op quando PORTAL_ADMIN_TOKEN não está definido,
+// como no backend embarcado do APK).
+const PUBLIC_API: { method: string; re: RegExp }[] = [
+  { method: "POST", re: /(^|\/)devices\/heartbeat\/?$/ },
+  { method: "POST", re: /(^|\/)devices\/[^/]+\/renewal\/?$/ },
+  { method: "GET", re: /(^|\/)payments\/[^/]+\/?$/ },
+  { method: "GET", re: /(^|\/)renewal\/info\/?$/ },
+  { method: "POST", re: /(^|\/)webhooks\/[^/]+\/?$/ },
+];
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {
-  const isHeartbeat =
-    req.method === "POST" && /(^|\/)devices\/heartbeat\/?$/.test(req.path);
-  if (isHeartbeat) {
+  if (PUBLIC_API.some((p) => p.method === req.method && p.re.test(req.path))) {
     next();
     return;
   }
@@ -42,6 +49,7 @@ app.use("/api", (req: Request, res: Response, next: NextFunction) => {
 
 app.use("/api", usersRouter);
 app.use("/api", devicesRouter);
+app.use("/api", paymentsRouter);
 
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
 if (fs.existsSync(frontendDist)) {
@@ -63,5 +71,8 @@ app.listen(PORT, HOST, () => {
   );
   console.log(
     `  token de admin: ${portalTokenConfigured() ? "exigido (x-portal-token)" : "aberto (sem PORTAL_ADMIN_TOKEN)"}`
+  );
+  console.log(
+    `  pagamento (Mercado Pago): ${mpConfigured() ? "configurado" : "não configurado (MP_ACCESS_TOKEN ausente)"}`
   );
 });

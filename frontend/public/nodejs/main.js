@@ -742,8 +742,8 @@ var require_toidentifier = __commonJS({
     "use strict";
     module2.exports = toIdentifier;
     function toIdentifier(str) {
-      return str.split(" ").map(function(token) {
-        return token.slice(0, 1).toUpperCase() + token.slice(1);
+      return str.split(" ").map(function(token2) {
+        return token2.slice(0, 1).toUpperCase() + token2.slice(1);
       }).join("").replace(/[^ _0-9a-z]/gi, "");
     }
   }
@@ -18069,17 +18069,17 @@ var require_router = __commonJS({
     var toString = Object.prototype.toString;
     var proto = module2.exports = function(options) {
       var opts = options || {};
-      function router3(req, res, next) {
-        router3.handle(req, res, next);
+      function router4(req, res, next) {
+        router4.handle(req, res, next);
       }
-      setPrototypeOf(router3, proto);
-      router3.params = {};
-      router3._params = [];
-      router3.caseSensitive = opts.caseSensitive;
-      router3.mergeParams = opts.mergeParams;
-      router3.strict = opts.strict;
-      router3.stack = [];
-      return router3;
+      setPrototypeOf(router4, proto);
+      router4.params = {};
+      router4._params = [];
+      router4.caseSensitive = opts.caseSensitive;
+      router4.mergeParams = opts.mergeParams;
+      router4.strict = opts.strict;
+      router4.stack = [];
+      return router4;
     };
     proto.param = function param(name, fn) {
       if (typeof name === "function") {
@@ -18788,14 +18788,14 @@ var require_etag = __commonJS({
   "node_modules/etag/index.js"(exports2, module2) {
     "use strict";
     module2.exports = etag;
-    var crypto2 = require("crypto");
+    var crypto4 = require("crypto");
     var Stats = require("fs").Stats;
     var toString = Object.prototype.toString;
     function entitytag(entity) {
       if (entity.length === 0) {
         return '"0-2jmj7l5rSw0yVb/vlWAYkK/YBwk"';
       }
-      var hash = crypto2.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
+      var hash = crypto4.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
       var len = typeof entity === "string" ? Buffer.byteLength(entity, "utf8") : entity.length;
       return '"' + len.toString(16) + "-" + hash + '"';
     }
@@ -20672,7 +20672,7 @@ var require_application = __commonJS({
   "node_modules/express/lib/application.js"(exports2, module2) {
     "use strict";
     var finalhandler = require_finalhandler();
-    var Router3 = require_router();
+    var Router4 = require_router();
     var methods = require_methods();
     var middleware = require_init();
     var query = require_query();
@@ -20737,7 +20737,7 @@ var require_application = __commonJS({
     };
     app2.lazyrouter = function lazyrouter() {
       if (!this._router) {
-        this._router = new Router3({
+        this._router = new Router4({
           caseSensitive: this.enabled("case sensitive routing"),
           strict: this.enabled("strict routing")
         });
@@ -20746,17 +20746,17 @@ var require_application = __commonJS({
       }
     };
     app2.handle = function handle(req, res, callback) {
-      var router3 = this._router;
+      var router4 = this._router;
       var done = callback || finalhandler(req, res, {
         env: this.get("env"),
         onerror: logerror.bind(this)
       });
-      if (!router3) {
+      if (!router4) {
         debug("no routes defined on app");
         done();
         return;
       }
-      router3.handle(req, res, done);
+      router4.handle(req, res, done);
     };
     app2.use = function use(fn) {
       var offset = 0;
@@ -20776,15 +20776,15 @@ var require_application = __commonJS({
         throw new TypeError("app.use() requires a middleware function");
       }
       this.lazyrouter();
-      var router3 = this._router;
+      var router4 = this._router;
       fns.forEach(function(fn2) {
         if (!fn2 || !fn2.handle || !fn2.set) {
-          return router3.use(path5, fn2);
+          return router4.use(path5, fn2);
         }
         debug(".use app under %s", path5);
         fn2.mountpath = path5;
         fn2.parent = this;
-        router3.use(path5, function mounted_app(req, res, next) {
+        router4.use(path5, function mounted_app(req, res, next) {
           var orig = req.app;
           fn2.handle(req, res, function(err) {
             setPrototypeOf(req, orig.request);
@@ -21688,11 +21688,11 @@ var require_request = __commonJS({
 // node_modules/cookie-signature/index.js
 var require_cookie_signature = __commonJS({
   "node_modules/cookie-signature/index.js"(exports2) {
-    var crypto2 = require("crypto");
+    var crypto4 = require("crypto");
     exports2.sign = function(val, secret) {
       if ("string" !== typeof val) throw new TypeError("Cookie value must be provided as a string.");
       if (null == secret) throw new TypeError("Secret key must be provided.");
-      return val + "." + crypto2.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
+      return val + "." + crypto4.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
     };
     exports2.unsign = function(val, secret) {
       if ("string" !== typeof val) throw new TypeError("Signed cookie string must be provided.");
@@ -21701,7 +21701,7 @@ var require_cookie_signature = __commonJS({
       return sha1(mac) == sha1(val) ? str : false;
     };
     function sha1(str) {
-      return crypto2.createHash("sha1").update(str).digest("hex");
+      return crypto4.createHash("sha1").update(str).digest("hex");
     }
   }
 });
@@ -22601,7 +22601,7 @@ var require_express = __commonJS({
     var mixin = require_merge_descriptors();
     var proto = require_application();
     var Route = require_route();
-    var Router3 = require_router();
+    var Router4 = require_router();
     var req = require_request();
     var res = require_response();
     exports2 = module2.exports = createApplication;
@@ -22624,7 +22624,7 @@ var require_express = __commonJS({
     exports2.request = req;
     exports2.response = res;
     exports2.Route = Route;
-    exports2.Router = Router3;
+    exports2.Router = Router4;
     exports2.json = bodyParser.json;
     exports2.query = require_query();
     exports2.raw = bodyParser.raw;
@@ -23842,6 +23842,466 @@ var init_devices = __esm({
   }
 });
 
+// src/paymentStore.ts
+function ensureSb() {
+  if (!supabaseEnabled()) {
+    throw new Error(
+      "Pagamento n\xE3o dispon\xEDvel neste modo (requer portal hospedado com Supabase)."
+    );
+  }
+}
+function coerceConfig(v) {
+  const o = v ?? {};
+  const num = (x, def) => typeof x === "number" && Number.isFinite(x) ? x : def;
+  return {
+    priceCents: Math.max(100, Math.round(num(o.priceCents, DEFAULT_CONFIG.priceCents))),
+    months: Math.max(1, Math.round(num(o.months, DEFAULT_CONFIG.months))),
+    qrTtlMin: Math.min(60, Math.max(5, Math.round(num(o.qrTtlMin, DEFAULT_CONFIG.qrTtlMin)))),
+    promoPriceCents: typeof o.promoPriceCents === "number" && o.promoPriceCents >= 100 ? Math.round(o.promoPriceCents) : null,
+    promoUntil: typeof o.promoUntil === "number" && Number.isFinite(o.promoUntil) ? o.promoUntil : null
+  };
+}
+async function getRenewalConfig() {
+  if (!supabaseEnabled()) return DEFAULT_CONFIG;
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(SETTINGS).select("value").eq("key", "renewal").maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? coerceConfig(data.value) : DEFAULT_CONFIG;
+}
+async function setRenewalConfig(patch) {
+  ensureSb();
+  const sb = await getSupabase();
+  const current = await getRenewalConfig();
+  const next = coerceConfig({ ...current, ...patch });
+  const { error } = await sb.from(SETTINGS).upsert({ key: "renewal", value: next, updated_at: Date.now() }, { onConflict: "key" });
+  if (error) throw new Error(error.message);
+  return next;
+}
+function effectivePriceCents(cfg, now = Date.now()) {
+  if (cfg.promoPriceCents && cfg.promoUntil && cfg.promoUntil > now) return cfg.promoPriceCents;
+  return cfg.priceCents;
+}
+function rowToPayment(r) {
+  const st = r.status;
+  return {
+    id: r.id,
+    deviceMac: r.device_mac,
+    provider: r.provider,
+    providerRef: r.provider_ref,
+    amountCents: Number(r.amount_cents),
+    months: Number(r.months) || 1,
+    status: ["pending", "paid", "expired", "error", "cancelled"].includes(st) ? st : "pending",
+    qrCode: r.qr_code,
+    qrCodeB64: r.qr_code_b64,
+    ticketUrl: r.ticket_url,
+    createdAt: Number(r.created_at),
+    expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
+    paidAt: r.paid_at != null ? Number(r.paid_at) : null,
+    processed: !!r.processed
+  };
+}
+function newPaymentId() {
+  return import_crypto2.default.randomUUID();
+}
+async function insertPayment(input) {
+  ensureSb();
+  const sb = await getSupabase();
+  const row = {
+    id: input.id,
+    device_mac: input.deviceMac,
+    provider: "mercadopago",
+    provider_ref: input.providerRef,
+    amount_cents: input.amountCents,
+    months: input.months,
+    status: "pending",
+    qr_code: input.qrCode,
+    qr_code_b64: input.qrCodeB64,
+    ticket_url: input.ticketUrl,
+    created_at: Date.now(),
+    expires_at: input.expiresAt
+  };
+  const { data, error } = await sb.from(PAYMENTS).insert(row).select("*").maybeSingle();
+  if (error) throw new Error(error.message);
+  return rowToPayment(data);
+}
+async function getPaymentById(id) {
+  ensureSb();
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(PAYMENTS).select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? rowToPayment(data) : null;
+}
+async function getPaymentByProviderRef(ref) {
+  ensureSb();
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(PAYMENTS).select("*").eq("provider_ref", ref).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? rowToPayment(data) : null;
+}
+async function getOpenPaymentForDevice(mac) {
+  ensureSb();
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(PAYMENTS).select("*").eq("device_mac", mac).eq("status", "pending").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const p = rowToPayment(data);
+  if (p.expiresAt != null && p.expiresAt <= Date.now()) return null;
+  return p;
+}
+async function listPaymentsForDevice(mac, limit = 10) {
+  ensureSb();
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(PAYMENTS).select("*").eq("device_mac", mac).order("created_at", { ascending: false }).limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => rowToPayment(r));
+}
+async function markPaymentStatus(id, status, extra = {}) {
+  ensureSb();
+  const sb = await getSupabase();
+  const upd = { status };
+  if (extra.paidAt != null) upd.paid_at = extra.paidAt;
+  if (extra.processed != null) upd.processed = extra.processed;
+  const { error } = await sb.from(PAYMENTS).update(upd).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+var import_crypto2, PAYMENTS, SETTINGS, DEFAULT_CONFIG;
+var init_paymentStore = __esm({
+  "src/paymentStore.ts"() {
+    "use strict";
+    import_crypto2 = __toESM(require("crypto"));
+    init_supabase();
+    PAYMENTS = "payments";
+    SETTINGS = "portal_settings";
+    DEFAULT_CONFIG = { priceCents: 1990, months: 1, qrTtlMin: 30 };
+  }
+});
+
+// src/mercadopago.ts
+function mpConfigured() {
+  return !!(process.env.MP_ACCESS_TOKEN || "").trim();
+}
+function token() {
+  const t = (process.env.MP_ACCESS_TOKEN || "").trim();
+  if (!t) throw new Error("MP_ACCESS_TOKEN n\xE3o configurado.");
+  return t;
+}
+function publicUrl() {
+  return (process.env.PORTAL_PUBLIC_URL || "").trim().replace(/\/+$/, "");
+}
+function isoWithOffset(ms) {
+  const d = new Date(ms);
+  const pad = (n, w = 2) => String(Math.abs(n)).padStart(w, "0");
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? "+" : "-";
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${sign}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
+}
+async function createPixPayment(input) {
+  const body = {
+    transaction_amount: Number(input.amountReais.toFixed(2)),
+    description: input.description,
+    payment_method_id: "pix",
+    external_reference: input.externalReference,
+    date_of_expiration: isoWithOffset(input.expiresAt),
+    payer: { email: input.payerEmail }
+  };
+  const notif = publicUrl();
+  if (notif) body.notification_url = `${notif}/api/webhooks/mercadopago`;
+  const res = await fetch(`${API}/v1/payments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token()}`,
+      "Content-Type": "application/json",
+      "X-Idempotency-Key": input.externalReference
+    },
+    body: JSON.stringify(body)
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = json && json.message || json && JSON.stringify(json.cause) || `MP HTTP ${res.status}`;
+    throw new Error(`Mercado Pago: ${msg}`);
+  }
+  const poi = json.point_of_interaction?.transaction_data ?? {};
+  return {
+    id: String(json.id),
+    status: String(json.status ?? "pending"),
+    qrCode: poi.qr_code ?? null,
+    qrCodeBase64: poi.qr_code_base64 ?? null,
+    ticketUrl: poi.ticket_url ?? null
+  };
+}
+async function getPayment(id) {
+  const res = await fetch(`${API}/v1/payments/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${token()}` }
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Mercado Pago: HTTP ${res.status}`);
+  return {
+    id: String(json.id),
+    status: String(json.status ?? ""),
+    statusDetail: String(json.status_detail ?? ""),
+    externalReference: json.external_reference ?? null,
+    transactionAmount: Number(json.transaction_amount ?? 0)
+  };
+}
+function verifyWebhookSignature(params) {
+  const secret = (process.env.MP_WEBHOOK_SECRET || "").trim();
+  if (!secret) return true;
+  const sig = params.xSignature || "";
+  const parts = Object.fromEntries(
+    sig.split(",").map((kv) => kv.split("=").map((s) => s.trim()))
+  );
+  const ts = parts.ts;
+  const v1 = parts.v1;
+  if (!ts || !v1) return false;
+  const manifest = `id:${params.dataId};request-id:${params.xRequestId ?? ""};ts:${ts};`;
+  const expected = import_crypto3.default.createHmac("sha256", secret).update(manifest).digest("hex");
+  try {
+    return import_crypto3.default.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));
+  } catch {
+    return false;
+  }
+}
+var import_crypto3, API;
+var init_mercadopago = __esm({
+  "src/mercadopago.ts"() {
+    "use strict";
+    import_crypto3 = __toESM(require("crypto"));
+    API = "https://api.mercadopago.com";
+  }
+});
+
+// src/routes/payments.ts
+function payerEmailFor(mac) {
+  return `pix.${mac.replace(/[^0-9a-z]/gi, "").toLowerCase()}@hciptv.app`;
+}
+async function settlePayment(row, paidAmountReais) {
+  if (row.processed || row.status === "paid") return;
+  const expectedReais = row.amountCents / 100;
+  if (paidAmountReais + 0.01 < expectedReais) {
+    await markPaymentStatus(row.id, "error");
+    throw new Error(
+      `Valor pago (R$ ${paidAmountReais.toFixed(2)}) menor que o esperado (R$ ${expectedReais.toFixed(2)}).`
+    );
+  }
+  await updateDevice(row.deviceMac, { extendDays: 30 * (row.months || 1) });
+  await markPaymentStatus(row.id, "paid", { paidAt: Date.now(), processed: true });
+}
+var import_express3, router3, publicPayment, payments_default;
+var init_payments = __esm({
+  "src/routes/payments.ts"() {
+    "use strict";
+    import_express3 = __toESM(require_express2());
+    init_deviceStore();
+    init_paymentStore();
+    init_mercadopago();
+    router3 = (0, import_express3.Router)();
+    publicPayment = (p) => ({
+      paymentId: p.id,
+      status: p.status,
+      amountCents: p.amountCents,
+      months: p.months,
+      qrCode: p.qrCode,
+      qrCodeBase64: p.qrCodeB64,
+      ticketUrl: p.ticketUrl,
+      expiresAt: p.expiresAt,
+      createdAt: p.createdAt
+    });
+    router3.get("/renewal/info", async (_req, res) => {
+      try {
+        const cfg = await getRenewalConfig();
+        res.json({
+          priceCents: effectivePriceCents(cfg),
+          months: cfg.months,
+          providerConfigured: mpConfigured()
+        });
+      } catch {
+        res.status(500).json({ error: "N\xE3o foi poss\xEDvel carregar as informa\xE7\xF5es de renova\xE7\xE3o." });
+      }
+    });
+    router3.post("/devices/:mac/renewal", async (req, res) => {
+      const mac = normalizeMac(req.params.mac);
+      if (!mac) {
+        res.status(400).json({ error: "MAC inv\xE1lido." });
+        return;
+      }
+      if (!mpConfigured()) {
+        res.status(503).json({ error: "Pagamento n\xE3o configurado no portal." });
+        return;
+      }
+      try {
+        const device = await findDevice(mac);
+        if (!device) {
+          res.status(404).json({ error: "Dispositivo n\xE3o encontrado." });
+          return;
+        }
+        if (!device.boundServerId) {
+          res.status(409).json({
+            error: "Dispositivo ainda n\xE3o foi liberado pelo provedor. Fale com o suporte."
+          });
+          return;
+        }
+        const open = await getOpenPaymentForDevice(mac);
+        if (open) {
+          res.json(publicPayment(open));
+          return;
+        }
+        const cfg = await getRenewalConfig();
+        const amountCents = effectivePriceCents(cfg);
+        const months = cfg.months;
+        const id = newPaymentId();
+        const expiresAt = Date.now() + cfg.qrTtlMin * 6e4;
+        const mp = await createPixPayment({
+          amountReais: amountCents / 100,
+          description: `Renova\xE7\xE3o IPTV \u2014 ${months} m\xEAs(es) \u2014 ${mac}`,
+          externalReference: id,
+          payerEmail: payerEmailFor(mac),
+          expiresAt
+        });
+        const saved = await insertPayment({
+          id,
+          deviceMac: mac,
+          amountCents,
+          months,
+          providerRef: mp.id,
+          qrCode: mp.qrCode,
+          qrCodeB64: mp.qrCodeBase64,
+          ticketUrl: mp.ticketUrl,
+          expiresAt
+        });
+        res.json(publicPayment(saved));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erro ao gerar a cobran\xE7a.";
+        res.status(502).json({ error: message });
+      }
+    });
+    router3.get("/payments/:id", async (req, res) => {
+      try {
+        const row = await getPaymentById(req.params.id);
+        if (!row) {
+          res.status(404).json({ error: "Cobran\xE7a n\xE3o encontrada." });
+          return;
+        }
+        let current = row;
+        if (row.status === "pending") {
+          if (row.expiresAt != null && row.expiresAt <= Date.now()) {
+            await markPaymentStatus(row.id, "expired");
+            current = { ...row, status: "expired" };
+          } else if (row.providerRef && mpConfigured()) {
+            try {
+              const mp = await getPayment(row.providerRef);
+              if (mp.status === "approved") {
+                await settlePayment(row, mp.transactionAmount);
+                current = { ...row, status: "paid" };
+              } else if (mp.status === "rejected" || mp.status === "cancelled") {
+                await markPaymentStatus(row.id, "cancelled");
+                current = { ...row, status: "cancelled" };
+              }
+            } catch {
+            }
+          }
+        }
+        const device = await findDevice(current.deviceMac);
+        res.json({
+          status: current.status,
+          months: current.months,
+          amountCents: current.amountCents,
+          expiresAt: current.expiresAt,
+          deviceAccess: device ? accessOf(device) : null
+        });
+      } catch {
+        res.status(500).json({ error: "Erro ao consultar a cobran\xE7a." });
+      }
+    });
+    router3.post("/webhooks/mercadopago", async (req, res) => {
+      const body = req.body ?? {};
+      const type = body.type || body.topic || req.query.type || req.query.topic;
+      const dataId = body.data && body.data.id || req.query["data.id"] || req.query.id || "";
+      if (type !== "payment" || !dataId) {
+        res.status(200).json({ ok: true, ignored: true });
+        return;
+      }
+      const ok = verifyWebhookSignature({
+        dataId: String(dataId),
+        xSignature: req.get("x-signature") ?? void 0,
+        xRequestId: req.get("x-request-id") ?? void 0
+      });
+      if (!ok) {
+        res.status(401).json({ error: "Assinatura inv\xE1lida." });
+        return;
+      }
+      try {
+        const mp = await getPayment(String(dataId));
+        if (mp.status !== "approved") {
+          res.status(200).json({ ok: true, status: mp.status });
+          return;
+        }
+        let row = mp.externalReference ? await getPaymentById(mp.externalReference) : null;
+        if (!row) row = await getPaymentByProviderRef(String(dataId));
+        if (!row) {
+          res.status(200).json({ ok: true, note: "cobran\xE7a desconhecida" });
+          return;
+        }
+        await settlePayment(row, mp.transactionAmount);
+        res.status(200).json({ ok: true, settled: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "erro";
+        if (msg.startsWith("Valor pago")) {
+          res.status(200).json({ ok: false, error: msg });
+        } else {
+          res.status(500).json({ error: msg });
+        }
+      }
+    });
+    router3.get("/settings/renewal", async (_req, res) => {
+      try {
+        const cfg = await getRenewalConfig();
+        res.json({ ...cfg, effectivePriceCents: effectivePriceCents(cfg), providerConfigured: mpConfigured() });
+      } catch {
+        res.status(500).json({ error: "N\xE3o foi poss\xEDvel carregar a configura\xE7\xE3o." });
+      }
+    });
+    router3.put("/settings/renewal", async (req, res) => {
+      const b = req.body ?? {};
+      const patch = {};
+      if (typeof b.priceCents === "number") patch.priceCents = b.priceCents;
+      if (typeof b.months === "number") patch.months = b.months;
+      if (typeof b.qrTtlMin === "number") patch.qrTtlMin = b.qrTtlMin;
+      if (b.promoPriceCents === null || typeof b.promoPriceCents === "number")
+        patch.promoPriceCents = b.promoPriceCents;
+      if (b.promoUntil === null || typeof b.promoUntil === "number") patch.promoUntil = b.promoUntil;
+      try {
+        const cfg = await setRenewalConfig(patch);
+        res.json({ ...cfg, effectivePriceCents: effectivePriceCents(cfg), providerConfigured: mpConfigured() });
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : "Erro ao salvar." });
+      }
+    });
+    router3.get("/devices/:mac/payments", async (req, res) => {
+      const mac = normalizeMac(req.params.mac);
+      if (!mac) {
+        res.status(400).json({ error: "MAC inv\xE1lido." });
+        return;
+      }
+      try {
+        const list = await listPaymentsForDevice(mac);
+        res.json(
+          list.map((p) => ({
+            id: p.id,
+            status: p.status,
+            amountCents: p.amountCents,
+            months: p.months,
+            createdAt: p.createdAt,
+            paidAt: p.paidAt
+          }))
+        );
+      } catch {
+        res.status(500).json({ error: "Erro ao carregar o hist\xF3rico." });
+      }
+    });
+    payments_default = router3;
+  }
+});
+
 // src/middleware/adminAuth.ts
 function portalTokenConfigured() {
   return TOKEN !== "";
@@ -23868,23 +24328,25 @@ var init_adminAuth = __esm({
 
 // src/server.ts
 var server_exports = {};
-var import_express3, import_cors, import_path3, import_fs3, app, PORT, HOST, frontendDist;
+var import_express4, import_cors, import_path3, import_fs3, app, PORT, HOST, PUBLIC_API, frontendDist;
 var init_server = __esm({
   "src/server.ts"() {
     "use strict";
-    import_express3 = __toESM(require_express2());
+    import_express4 = __toESM(require_express2());
     import_cors = __toESM(require_lib3());
     import_path3 = __toESM(require("path"));
     import_fs3 = __toESM(require("fs"));
     init_users();
     init_devices();
+    init_payments();
     init_adminAuth();
     init_supabase();
-    app = (0, import_express3.default)();
+    init_mercadopago();
+    app = (0, import_express4.default)();
     PORT = Number(process.env.PORT) || 3001;
     HOST = process.env.HOST || "0.0.0.0";
     app.use((0, import_cors.default)());
-    app.use(import_express3.default.json({ limit: "100kb" }));
+    app.use(import_express4.default.json({ limit: "100kb" }));
     app.get("/healthz", (_req, res) => {
       res.json({
         ok: true,
@@ -23892,9 +24354,15 @@ var init_server = __esm({
         tokenRequired: portalTokenConfigured()
       });
     });
+    PUBLIC_API = [
+      { method: "POST", re: /(^|\/)devices\/heartbeat\/?$/ },
+      { method: "POST", re: /(^|\/)devices\/[^/]+\/renewal\/?$/ },
+      { method: "GET", re: /(^|\/)payments\/[^/]+\/?$/ },
+      { method: "GET", re: /(^|\/)renewal\/info\/?$/ },
+      { method: "POST", re: /(^|\/)webhooks\/[^/]+\/?$/ }
+    ];
     app.use("/api", (req, res, next) => {
-      const isHeartbeat = req.method === "POST" && /(^|\/)devices\/heartbeat\/?$/.test(req.path);
-      if (isHeartbeat) {
+      if (PUBLIC_API.some((p) => p.method === req.method && p.re.test(req.path))) {
         next();
         return;
       }
@@ -23902,9 +24370,10 @@ var init_server = __esm({
     });
     app.use("/api", users_default);
     app.use("/api", devices_default);
+    app.use("/api", payments_default);
     frontendDist = import_path3.default.join(__dirname, "..", "..", "frontend", "dist");
     if (import_fs3.default.existsSync(frontendDist)) {
-      app.use(import_express3.default.static(frontendDist));
+      app.use(import_express4.default.static(frontendDist));
       app.get(/^(?!\/api).*/, (_req, res) => {
         res.sendFile(import_path3.default.join(frontendDist, "index.html"));
       });
@@ -23920,6 +24389,9 @@ var init_server = __esm({
       );
       console.log(
         `  token de admin: ${portalTokenConfigured() ? "exigido (x-portal-token)" : "aberto (sem PORTAL_ADMIN_TOKEN)"}`
+      );
+      console.log(
+        `  pagamento (Mercado Pago): ${mpConfigured() ? "configurado" : "n\xE3o configurado (MP_ACCESS_TOKEN ausente)"}`
       );
     });
   }
