@@ -99,8 +99,14 @@ Requisitos Android: JDK 17 (`JAVA_HOME`), Android SDK
 | POST   | `/api/devices/heartbeat` | **(chamado pelo Player — público, sem token)** anuncia/atualiza um dispositivo por MAC; devolve `{host,username,password}` quando `status:"active"` |
 | GET    | `/api/devices` | lista de dispositivos |
 | GET    | `/api/devices/:mac` | um dispositivo (auto-preencher nome) |
-| PUT    | `/api/devices/:mac` | vincular servidor / renomear / ativar-desativar |
+| PUT    | `/api/devices/:mac` | vincular servidor / renomear / ativar-desativar / definir validade (`expiresAt`, `extendDays`, `validityDays`) |
 | DELETE | `/api/devices/:mac` | desparear |
+| GET    | `/api/devices/:mac/payments` | histórico de cobranças do dispositivo |
+| GET    | `/api/renewal/info` | **(público)** preço em vigor + `providerConfigured` (pro botão "Renovar") |
+| POST   | `/api/devices/:mac/renewal` | **(público)** gera/reaproveita uma cobrança PIX (Mercado Pago) pro dispositivo |
+| GET    | `/api/payments/:id` | **(público)** status da cobrança (o Player faz polling; auto-cura consultando o MP) |
+| POST   | `/api/webhooks/mercadopago` | **(público, assinatura validada)** o MP avisa o pagamento → portal estende +30d |
+| GET/PUT| `/api/settings/renewal` | lê/edita preço, meses, TTL do QR e valor promocional |
 | GET    | `/healthz` | health check público (`{ok,storage,tokenRequired}`) |
 
 Todas as rotas `/api/*` **exceto** `POST /api/devices/heartbeat` exigem o header
@@ -113,9 +119,15 @@ escuta em `127.0.0.1`), a API fica aberta.
 | Var | Efeito |
 |-----|--------|
 | `SUPABASE_URL` + `SUPABASE_SECRET_KEY` | as duas juntas → persiste no Postgres do Supabase; em branco → arquivos `data/*.txt` |
-| `PORTAL_ADMIN_TOKEN` | token exigido em `x-portal-token` (todas as rotas menos o heartbeat). Em branco = API aberta |
+| `PORTAL_ADMIN_TOKEN` | token exigido em `x-portal-token` (todas as rotas menos as públicas). Em branco = API aberta |
+| `MP_ACCESS_TOKEN` | Access Token do Mercado Pago (`APP_USR-...` em produção, `TEST-...` em sandbox). Sem ele, renovação por PIX fica off e o Player esconde o botão |
+| `MP_WEBHOOK_SECRET` | assinatura secreta do webhook do MP (painel → app → Webhooks). Sem ela o webhook roda sem validar assinatura (o polling confirma igual) |
+| `PORTAL_PUBLIC_URL` | URL pública do portal — usada pra montar o `notification_url` do webhook do MP |
 | `PORT` / `HOST` | padrão `3001` / `0.0.0.0` (a maioria dos hosts injeta `PORT`) |
 | `DATA_DIR` | só no modo arquivo: onde gravar `usuarios.txt` / `devices.txt` |
+
+> Preço, meses e valor promocional **não** são env var — ficam na tabela `portal_settings`
+> do Supabase, editáveis no Manager (ícone 💳 no header).
 
 ## Portal hospedado (Supabase + Fly/Render)
 
@@ -163,3 +175,44 @@ O container não usa disco persistente — todo o estado fica no Supabase.
 Sem hospedar: `cd backend && npm run dev` escuta em `0.0.0.0:3001`; informe
 `http://<ip-da-maquina>:3001` no Player. Para Supabase local, crie um
 `backend/.env` a partir do `.env.example`.
+
+## Renovação por PIX (Mercado Pago)
+
+O usuário paga por PIX e o portal estende a validade do dispositivo em +30 dias
+automaticamente. Fluxo: device expira → Player mostra **"Renovar acesso — R$ X"** →
+gera cobrança PIX (`/v1/payments`) → mostra o QR/copia-e-cola → o Player faz *polling*
+e o MP dispara um **webhook assinado** → o portal confere o valor, marca `paid` (idempotente)
+e chama `updateDevice(mac, { extendDays: 30 * meses })`.
+
+**Setup (uma vez):**
+
+1. **App no Mercado Pago** — [mercadopago.com.br/developers](https://www.mercadopago.com.br/developers)
+   → Suas integrações → criar aplicação (Pagamentos online / Checkout API).
+2. **Ativar credenciais de produção** — no app, seção *Credenciais de produção*: preencher
+   **Indústria** + **Website**, aceitar os termos, resolver o reCAPTCHA → **Ativar**. O
+   `APP_USR-...` (Access Token) aparece aí. (As credenciais de teste `TEST-...` já vêm
+   ativas pra sandbox.)
+3. **Chave Pix** — cadastrar uma chave Pix na conta do MP (Configurações → Suas chaves Pix).
+   **Sem chave Pix, o PIX de produção não gera cobrança.**
+4. **Webhook** — no app do MP, Webhooks: URL `https://<seu-portal>/api/webhooks/mercadopago`,
+   tópico **payment**. Copiar a **assinatura secreta**.
+5. **Env vars no host** — `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`,
+   `PORTAL_PUBLIC_URL=https://<seu-portal>`.
+6. **Preço** — no Manager, ícone 💳 no header: preço (R$), meses, validade do QR (min) e
+   **valor promocional** (preço + data "até"). Default: R$ 19,90 / 1 mês / QR 30 min.
+
+Homologação do Mercado Pago (selo de qualidade da integração) é **opcional** — não trava
+o recebimento de pagamentos.
+
+## Segurança — rotação de segredos
+
+`PORTAL_ADMIN_TOKEN`, `SUPABASE_SECRET_KEY` e os tokens do Mercado Pago passaram pelo chat
+do assistente durante a implementação. Para rotacionar depois:
+
+- **`MP_ACCESS_TOKEN` / `MP_WEBHOOK_SECRET`** — painel do MP → app → *Renovar credenciais* /
+  regerar a assinatura → atualizar as env vars no host.
+- **`SUPABASE_SECRET_KEY`** — Supabase → API Keys → criar nova Secret key, revogar a antiga
+  → atualizar a env var no host.
+- **`PORTAL_ADMIN_TOKEN`** — gerar novo valor → env var no host → **regerar o
+  `frontend/src/lib/baked-config.ts`** (blob XOR+base64 com o novo token) → rebuild +
+  reinstalar o APK do Manager (o token vai embutido/ofuscado no app).
