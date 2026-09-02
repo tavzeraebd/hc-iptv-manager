@@ -23996,14 +23996,13 @@ function isoWithOffset(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${sign}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
 }
 async function createPixPayment(input) {
-  const testFirstName = (process.env.MP_TEST_FIRST_NAME || "").trim();
   const body = {
     transaction_amount: Number(input.amountReais.toFixed(2)),
     description: input.description,
     payment_method_id: "pix",
     external_reference: input.externalReference,
     date_of_expiration: isoWithOffset(input.expiresAt),
-    payer: testFirstName ? { email: input.payerEmail, first_name: testFirstName } : { email: input.payerEmail }
+    payer: { email: input.payerEmail }
   };
   const notif = publicUrl();
   if (notif) body.notification_url = `${notif}/api/webhooks/mercadopago`;
