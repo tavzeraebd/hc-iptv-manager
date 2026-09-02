@@ -42,6 +42,11 @@ export function useDevices(enabled: boolean) {
   }, []);
 
   const bind = useCallback((mac: string, boundServerId: string | null) => patch(mac, { boundServerId }), [patch]);
+  /** Define a lista ordenada de linhas (principal + reservas de failover). */
+  const setServers = useCallback(
+    (mac: string, ids: string[]) => patch(mac, { boundServerIds: ids }),
+    [patch]
+  );
   const rename = useCallback((mac: string, name: string) => patch(mac, { name }), [patch]);
   const setStatus = useCallback((mac: string, status: DeviceStatus) => patch(mac, { status }), [patch]);
   /** Renova somando dias à validade atual (se válida) ou a partir de agora. */
@@ -67,5 +72,5 @@ export function useDevices(enabled: boolean) {
     return () => clearInterval(id);
   }, [enabled, reload]);
 
-  return { devices, loading, error, reload, patch, bind, rename, setStatus, extend, setExpiry, remove };
+  return { devices, loading, error, reload, patch, bind, setServers, rename, setStatus, extend, setExpiry, remove };
 }

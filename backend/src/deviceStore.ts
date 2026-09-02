@@ -29,8 +29,12 @@ export interface Device {
   firstSeenAt: number;
   lastSeenAt: number;
   status: DeviceStatus;
-  /** id de uma entrada de usuarios.txt (ver storage.ts). */
-  boundServerId?: string;
+  /**
+   * Linhas vinculadas (ids de entradas de usuarios.txt / iptv_users), em ordem
+   * de prioridade: `[0]` é a principal, as demais são reservas de failover.
+   * Vazio = nenhuma linha vinculada.
+   */
+  boundServerIds: string[];
   /** Validade do acesso (epoch ms). null = sem validade (vitalício). */
   expiresAt: number | null;
 }
@@ -44,7 +48,13 @@ export interface HeartbeatInput {
 
 export interface DeviceAdminPatch {
   name?: string;
+  /** Linha única (compat). `null`/`""` desvincula. Ignorado se `boundServerIds` vier. */
   boundServerId?: string | null;
+  /**
+   * Lista ordenada de linhas (principal + reservas). `null` ou `[]` desvincula
+   * todas. Tem prioridade sobre `boundServerId`.
+   */
+  boundServerIds?: string[] | null;
   status?: DeviceStatus;
   /** Define a validade absoluta. `null` = vitalício. `undefined` = não mexe. */
   expiresAt?: number | null;
@@ -64,6 +74,39 @@ export function normalizeMac(raw: unknown): string | null {
 
 function coerceStatus(v: unknown): DeviceStatus {
   return v === "active" || v === "disabled" ? v : "pending";
+}
+
+// Normaliza uma lista de ids de linha: só strings não-vazias, sem duplicatas,
+// preservando a ordem. Aceita também o formato antigo (id único em string).
+function coerceServerIds(raw: unknown, legacy?: unknown): string[] {
+  const arr = Array.isArray(raw)
+    ? raw
+    : typeof legacy === "string" && legacy
+    ? [legacy]
+    : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of arr) {
+    if (typeof v === "string" && v && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+// Resolve a nova lista de linhas a partir do patch. `undefined` = não mexe.
+function resolveBoundServerIds(
+  current: string[],
+  patch: DeviceAdminPatch
+): string[] | undefined {
+  if (patch.boundServerIds !== undefined) {
+    return patch.boundServerIds === null ? [] : coerceServerIds(patch.boundServerIds);
+  }
+  if (patch.boundServerId !== undefined) {
+    return patch.boundServerId ? [patch.boundServerId] : [];
+  }
+  return undefined;
 }
 
 /** Acesso expirou? (só relevante quando status === "active") */
@@ -129,7 +172,7 @@ function parseLine(line: string): Device | null {
       firstSeenAt: typeof p.firstSeenAt === "number" ? p.firstSeenAt : Date.now(),
       lastSeenAt: typeof p.lastSeenAt === "number" ? p.lastSeenAt : Date.now(),
       status: coerceStatus(p.status),
-      boundServerId: typeof p.boundServerId === "string" ? p.boundServerId : undefined,
+      boundServerIds: coerceServerIds(p.boundServerIds, p.boundServerId),
       expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null,
     };
   } catch {
@@ -175,6 +218,7 @@ async function fileUpsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
       firstSeenAt: now,
       lastSeenAt: now,
       status: "pending",
+      boundServerIds: [],
       expiresAt: null,
     };
     devices.push(created);
@@ -212,6 +256,7 @@ async function fileUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<D
       firstSeenAt: now,
       lastSeenAt: 0,
       status: "pending",
+      boundServerIds: [],
       expiresAt: null,
     });
     idx = devices.length - 1;
@@ -223,11 +268,8 @@ async function fileUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<D
   if (patch.status === "pending" || patch.status === "active" || patch.status === "disabled") {
     next.status = patch.status;
   }
-  if (patch.boundServerId === null) {
-    delete next.boundServerId;
-  } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
-    next.boundServerId = patch.boundServerId;
-  }
+  const resolvedIds = resolveBoundServerIds(cur.boundServerIds, patch);
+  if (resolvedIds !== undefined) next.boundServerIds = resolvedIds;
   const resolvedExp = resolveExpiry(cur.expiresAt, patch, now);
   if (resolvedExp !== undefined) next.expiresAt = resolvedExp;
   devices[idx] = next;
@@ -258,6 +300,7 @@ interface DeviceRow {
   last_seen_at: number | string | null;
   status: string | null;
   bound_server_id: string | null;
+  bound_server_ids: unknown;
   expires_at: number | string | null;
 }
 
@@ -270,7 +313,7 @@ function rowToDevice(r: DeviceRow): Device {
     firstSeenAt: Number(r.first_seen_at) || Date.now(),
     lastSeenAt: Number(r.last_seen_at) || 0,
     status: coerceStatus(r.status),
-    boundServerId: r.bound_server_id ?? undefined,
+    boundServerIds: coerceServerIds(r.bound_server_ids, r.bound_server_id),
     expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
   };
 }
@@ -358,7 +401,7 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
     if (error && error.code !== "23505") throw new Error(error.message);
     existing =
       (await sbFindDevice(norm)) ??
-      rowToDevice({ ...base, bound_server_id: null, expires_at: null });
+      rowToDevice({ ...base, bound_server_id: null, bound_server_ids: [], expires_at: null });
   }
 
   const upd: Record<string, unknown> = {};
@@ -366,10 +409,12 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
   if (patch.status === "pending" || patch.status === "active" || patch.status === "disabled") {
     upd.status = patch.status;
   }
-  if (patch.boundServerId === null) {
-    upd.bound_server_id = null;
-  } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
-    upd.bound_server_id = patch.boundServerId;
+  const resolvedIds = resolveBoundServerIds(existing.boundServerIds, patch);
+  if (resolvedIds !== undefined) {
+    // jsonb com a lista ordenada completa; a coluna FK guarda só a principal
+    // (mantém o ON DELETE SET NULL da linha principal coerente).
+    upd.bound_server_ids = resolvedIds;
+    upd.bound_server_id = resolvedIds[0] ?? null;
   }
   const resolvedExp = resolveExpiry(existing.expiresAt, patch, now);
   if (resolvedExp !== undefined) upd.expires_at = resolvedExp;

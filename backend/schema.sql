@@ -29,11 +29,20 @@ create table if not exists public.devices (
   status          text not null default 'pending'
                     check (status in ('pending', 'active', 'disabled')),
   bound_server_id uuid references public.iptv_users(id) on delete set null,
+  -- linhas vinculadas em ordem de prioridade (jsonb: ["<id principal>", "<reserva>", ...]).
+  -- bound_server_id continua guardando a principal (mantém o ON DELETE SET NULL dela).
+  bound_server_ids jsonb not null default '[]'::jsonb,
   -- validade do acesso (epoch ms). NULL = sem validade (vitalício).
   expires_at      bigint
 );
 -- para bancos criados antes da coluna de validade:
 alter table public.devices add column if not exists expires_at bigint;
+-- para bancos criados antes do failover multi-linha:
+alter table public.devices add column if not exists bound_server_ids jsonb not null default '[]'::jsonb;
+update public.devices
+   set bound_server_ids = to_jsonb(array[bound_server_id::text])
+ where bound_server_id is not null
+   and (bound_server_ids is null or bound_server_ids = '[]'::jsonb);
 
 create index if not exists devices_last_seen_idx on public.devices (last_seen_at desc);
 

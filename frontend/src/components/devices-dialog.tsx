@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import {
   CalendarClock,
   Check,
+  ChevronDown,
+  ChevronUp,
   Infinity as InfinityIcon,
   Loader2,
   MonitorSmartphone,
@@ -108,7 +110,7 @@ function fromDateInput(v: string): number | null {
 }
 
 export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }: DevicesDialogProps) {
-  const { devices, loading, error, reload, bind, rename, setStatus, extend, setExpiry, remove, patch } =
+  const { devices, loading, error, reload, setServers, rename, setStatus, extend, setExpiry, remove, patch } =
     useDevices(open);
 
   const serverLabel = useMemo(() => {
@@ -161,7 +163,11 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
               device={d}
               servers={servers}
               serverLabel={serverLabel}
-              onBind={(id) => bind(d.mac, id).catch((e) => toast.error(String(e)))}
+              onSetServers={(ids) =>
+                setServers(d.mac, ids)
+                  .then(() => toast.success(ids.length ? "Linhas atualizadas." : "Linhas removidas."))
+                  .catch((e) => toast.error(String(e)))
+              }
               onRename={(name) => rename(d.mac, name).then(() => toast.success("Nome salvo.")).catch((e) => toast.error(String(e)))}
               onStatus={(s) => setStatus(d.mac, s).catch((e) => toast.error(String(e)))}
               onActivate={() =>
@@ -354,7 +360,7 @@ function DeviceRow({
   device,
   servers,
   serverLabel,
-  onBind,
+  onSetServers,
   onRename,
   onStatus,
   onActivate,
@@ -365,7 +371,7 @@ function DeviceRow({
   device: PortalDevice;
   servers: IptvUserWithCheck[];
   serverLabel: Map<string, string>;
-  onBind: (id: string | null) => void;
+  onSetServers: (ids: string[]) => void;
   onRename: (name: string) => void;
   onStatus: (s: DeviceStatus) => void;
   onActivate: () => void;
@@ -427,37 +433,34 @@ function DeviceRow({
         {device.model || "modelo desconhecido"} · {device.platform || "—"} · visto {relTime(device.lastSeenAt)}
       </p>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Select
-          value={device.boundServerId ?? NONE}
-          onValueChange={(v) => onBind(v === NONE ? null : v)}
-        >
-          <SelectTrigger className="h-8 w-[260px]">
-            <SelectValue placeholder="Sem servidor" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>Sem servidor</SelectItem>
-            {servers.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                {serverLabel.get(s.id)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-col gap-2">
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">
+            Linhas (a 1ª é a principal; as demais entram sozinhas se ela cair)
+          </p>
+          <ServerLinesEditor
+            servers={servers}
+            serverLabel={serverLabel}
+            value={device.boundServerIds}
+            onChange={onSetServers}
+          />
+        </div>
 
-        {device.status === "active" ? (
-          <Button size="sm" variant="outline" onClick={() => onStatus("disabled")}>
-            <Power className="size-4" /> Desativar
-          </Button>
-        ) : (
-          <Button size="sm" onClick={onActivate} disabled={!device.boundServerId}>
-            <Power className="size-4" /> Ativar
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {device.status === "active" ? (
+            <Button size="sm" variant="outline" onClick={() => onStatus("disabled")}>
+              <Power className="size-4" /> Desativar
+            </Button>
+          ) : (
+            <Button size="sm" onClick={onActivate} disabled={device.boundServerIds.length === 0}>
+              <Power className="size-4" /> Ativar
+            </Button>
+          )}
 
-        <Button size="sm" variant="ghost" className="text-destructive" onClick={onRemove}>
-          <Trash2 className="size-4" />
-        </Button>
+          <Button size="sm" variant="ghost" className="text-destructive" onClick={onRemove}>
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {showValidity && (
@@ -505,6 +508,96 @@ function DeviceRow({
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Editor da lista ordenada de linhas do dispositivo: [0] é a principal, as
+// demais são reservas de failover que o Player usa sozinho se a de cima cair.
+function ServerLinesEditor({
+  servers,
+  serverLabel,
+  value,
+  onChange,
+}: {
+  servers: IptvUserWithCheck[];
+  serverLabel: Map<string, string>;
+  value: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const available = servers.filter((s) => !value.includes(s.id));
+
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= value.length) return;
+    const next = [...value];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const removeAt = (i: number) => onChange(value.filter((_, k) => k !== i));
+  const add = (id: string) => {
+    if (id !== NONE && !value.includes(id)) onChange([...value, id]);
+  };
+
+  return (
+    <div className="flex w-full flex-col gap-1.5">
+      {value.map((id, i) => (
+        <div key={id} className="flex items-center gap-1.5 text-xs">
+          <Badge variant={i === 0 ? "success" : "warning"} className="shrink-0">
+            {i === 0 ? "Principal" : `Reserva ${i}`}
+          </Badge>
+          <span className="min-w-0 flex-1 truncate font-mono" title={serverLabel.get(id) ?? id}>
+            {serverLabel.get(id) ?? id}
+          </span>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-6"
+            disabled={i === 0}
+            onClick={() => move(i, -1)}
+            title="Subir (mais prioridade)"
+          >
+            <ChevronUp className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-6"
+            disabled={i === value.length - 1}
+            onClick={() => move(i, 1)}
+            title="Descer"
+          >
+            <ChevronDown className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-6 text-destructive"
+            onClick={() => removeAt(i)}
+            title="Remover linha"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      ))}
+
+      {available.length > 0 && (
+        <Select value={NONE} onValueChange={add}>
+          <SelectTrigger className={value.length === 0 ? "h-8 w-[260px]" : "h-7 w-[260px] text-xs"}>
+            <SelectValue placeholder={value.length === 0 ? "Vincular linha" : "+ adicionar reserva"} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>
+              {value.length === 0 ? "Sem linha" : "+ adicionar reserva"}
+            </SelectItem>
+            {available.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {serverLabel.get(s.id)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       )}
     </div>
   );

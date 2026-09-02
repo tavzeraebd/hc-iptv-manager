@@ -83,7 +83,7 @@ router.post("/devices/:mac/renewal", async (req: Request, res: Response) => {
       res.status(404).json({ error: "Dispositivo não encontrado." });
       return;
     }
-    if (!device.boundServerId) {
+    if (device.boundServerIds.length === 0) {
       res.status(409).json({
         error: "Dispositivo ainda não foi liberado pelo provedor. Fale com o suporte.",
       });

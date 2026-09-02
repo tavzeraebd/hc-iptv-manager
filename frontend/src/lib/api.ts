@@ -194,7 +194,10 @@ export interface PortalDevice {
   platform: string;
   status: DeviceStatus;
   access: DeviceAccess;
+  /** Linha principal (= boundServerIds[0]). Mantido por compatibilidade. */
   boundServerId: string | null;
+  /** Linhas vinculadas em ordem: [0] principal, demais são reservas de failover. */
+  boundServerIds: string[];
   firstSeenAt: number;
   lastSeenAt: number;
   /** Validade do acesso (epoch ms). null = sem validade (vitalício). */
@@ -204,6 +207,8 @@ export interface PortalDevice {
 export interface DevicePatch {
   name?: string;
   boundServerId?: string | null;
+  /** Lista ordenada de linhas (principal + reservas). `[]` ou `null` desvincula todas. */
+  boundServerIds?: string[] | null;
   status?: DeviceStatus;
   /** Validade absoluta: número (epoch ms) | null (vitalício) | undefined (não mexe). */
   expiresAt?: number | null;
