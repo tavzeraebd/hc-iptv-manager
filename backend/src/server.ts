@@ -9,6 +9,13 @@ import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
 import { mpConfigured } from "./mercadopago";
 
+// Rede de segurança: uma rejeição não tratada em qualquer handler async
+// (Express 4 não as captura) derrubaria o processo. Num portal hospedado isso
+// vira crash-loop + 502. Logar e seguir de pé é sempre melhor que cair.
+process.on("unhandledRejection", (reason) => {
+  console.error("unhandledRejection:", reason);
+});
+
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 // No app Android o backend roda embarcado (nodejs-mobile) e serve só a API;

@@ -93,12 +93,16 @@ router.get("/devices", async (_req: Request, res: Response) => {
 });
 
 router.get("/devices/:mac", async (req: Request, res: Response) => {
-  const device = await findDevice(req.params.mac);
-  if (!device) {
-    res.status(404).json({ error: "Dispositivo não encontrado." });
-    return;
+  try {
+    const device = await findDevice(req.params.mac);
+    if (!device) {
+      res.status(404).json({ error: "Dispositivo não encontrado." });
+      return;
+    }
+    res.json(withAccess(device));
+  } catch {
+    res.status(500).json({ error: "Não foi possível carregar o dispositivo." });
   }
-  res.json(withAccess(device));
 });
 
 router.put("/devices/:mac", async (req: Request, res: Response) => {
@@ -109,59 +113,59 @@ router.put("/devices/:mac", async (req: Request, res: Response) => {
   }
   const body = (req.body ?? {}) as Record<string, unknown>;
 
-  let boundServerId: string | null | undefined;
-  if (body.boundServerId === null || body.boundServerId === "") {
-    boundServerId = null;
-  } else if (typeof body.boundServerId === "string") {
-    const user = await findUser(body.boundServerId);
-    if (!user) {
-      res.status(400).json({ error: "Servidor vinculado não existe." });
-      return;
-    }
-    boundServerId = body.boundServerId;
-  }
-
-  // Lista ordenada de linhas (principal + reservas). Tem prioridade sobre
-  // `boundServerId`. `null` ou `[]` desvincula todas.
-  let boundServerIds: string[] | null | undefined;
-  if (body.boundServerIds === null) {
-    boundServerIds = null;
-  } else if (Array.isArray(body.boundServerIds)) {
-    const seen = new Set<string>();
-    const ids: string[] = [];
-    for (const raw of body.boundServerIds) {
-      if (typeof raw !== "string" || !raw || seen.has(raw)) continue;
-      if (!(await findUser(raw))) {
-        res.status(400).json({ error: `Servidor ${raw} não existe.` });
+  try {
+    let boundServerId: string | null | undefined;
+    if (body.boundServerId === null || body.boundServerId === "") {
+      boundServerId = null;
+    } else if (typeof body.boundServerId === "string") {
+      const user = await findUser(body.boundServerId);
+      if (!user) {
+        res.status(400).json({ error: "Servidor vinculado não existe." });
         return;
       }
-      seen.add(raw);
-      ids.push(raw);
+      boundServerId = body.boundServerId;
     }
-    boundServerIds = ids;
-  }
 
-  const status =
-    body.status === "pending" || body.status === "active" || body.status === "disabled"
-      ? body.status
-      : undefined;
+    // Lista ordenada de linhas (principal + reservas). Tem prioridade sobre
+    // `boundServerId`. `null` ou `[]` desvincula todas.
+    let boundServerIds: string[] | null | undefined;
+    if (body.boundServerIds === null) {
+      boundServerIds = null;
+    } else if (Array.isArray(body.boundServerIds)) {
+      const seen = new Set<string>();
+      const ids: string[] = [];
+      for (const raw of body.boundServerIds) {
+        if (typeof raw !== "string" || !raw || seen.has(raw)) continue;
+        if (!(await findUser(raw))) {
+          res.status(400).json({ error: `Servidor ${raw} não existe.` });
+          return;
+        }
+        seen.add(raw);
+        ids.push(raw);
+      }
+      boundServerIds = ids;
+    }
 
-  // Validade: `expiresAt` absoluto (número | null p/ vitalício | undefined = não mexe);
-  // `extendDays` renova somando dias; `validityDays` = padrão ao ativar.
-  let expiresAt: number | null | undefined;
-  if (body.expiresAt === null) {
-    expiresAt = null;
-  } else if (typeof body.expiresAt === "number" && Number.isFinite(body.expiresAt)) {
-    expiresAt = body.expiresAt;
-  }
-  const extendDays =
-    typeof body.extendDays === "number" && body.extendDays > 0 ? body.extendDays : undefined;
-  const defaultValidityDays =
-    typeof body.validityDays === "number" && body.validityDays > 0
-      ? body.validityDays
-      : undefined;
+    const status =
+      body.status === "pending" || body.status === "active" || body.status === "disabled"
+        ? body.status
+        : undefined;
 
-  try {
+    // Validade: `expiresAt` absoluto (número | null p/ vitalício | undefined = não mexe);
+    // `extendDays` renova somando dias; `validityDays` = padrão ao ativar.
+    let expiresAt: number | null | undefined;
+    if (body.expiresAt === null) {
+      expiresAt = null;
+    } else if (typeof body.expiresAt === "number" && Number.isFinite(body.expiresAt)) {
+      expiresAt = body.expiresAt;
+    }
+    const extendDays =
+      typeof body.extendDays === "number" && body.extendDays > 0 ? body.extendDays : undefined;
+    const defaultValidityDays =
+      typeof body.validityDays === "number" && body.validityDays > 0
+        ? body.validityDays
+        : undefined;
+
     const updated = await updateDevice(mac, {
       name: typeof body.name === "string" ? body.name : undefined,
       boundServerId,

@@ -198,10 +198,20 @@ async function sbDeleteUser(id: string): Promise<boolean> {
   return (data?.length ?? 0) > 0;
 }
 
+// id da coluna é uuid — consultar com uma string fora do formato faz o
+// Postgres devolver "invalid input syntax for type uuid" (código 22P02).
+// Nesse caso o certo é "não encontrado", não estourar.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function sbFindUser(id: string): Promise<IptvUser | null> {
+  if (!UUID_RE.test(id)) return null;
   const sb = await getSupabase();
   const { data, error } = await sb.from(TABLE).select("*").eq("id", id).maybeSingle();
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.code === "22P02") return null;
+    throw new Error(error.message);
+  }
   return data ? rowToUser(data as UserRow) : null;
 }
 
