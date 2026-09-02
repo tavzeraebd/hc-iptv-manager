@@ -51,13 +51,18 @@ function isoWithOffset(ms: number): string {
 }
 
 export async function createPixPayment(input: CreatePixInput): Promise<MpPixResult> {
+  // Sandbox: MP_TEST_FIRST_NAME=APRO faz o pagamento de teste ser aprovado
+  // automaticamente logo após criado. NUNCA definir em produção.
+  const testFirstName = (process.env.MP_TEST_FIRST_NAME || "").trim();
   const body: Record<string, unknown> = {
     transaction_amount: Number(input.amountReais.toFixed(2)),
     description: input.description,
     payment_method_id: "pix",
     external_reference: input.externalReference,
     date_of_expiration: isoWithOffset(input.expiresAt),
-    payer: { email: input.payerEmail },
+    payer: testFirstName
+      ? { email: input.payerEmail, first_name: testFirstName }
+      : { email: input.payerEmail },
   };
   const notif = publicUrl();
   if (notif) body.notification_url = `${notif}/api/webhooks/mercadopago`;
