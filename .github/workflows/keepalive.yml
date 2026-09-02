@@ -1,0 +1,25 @@
+name: keep-alive
+
+# Pinga o /healthz do portal pra segurar o serviço free do Render acordado
+# (ele dorme após ~15 min sem tráfego). Cron do GitHub Actions costuma atrasar
+# alguns minutos em horário de pico — pra 100% sem dormir, use um serviço de
+# uptime externo (ex.: UptimeRobot free, check a cada 5 min) ou o plano pago.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: curl /healthz
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 \
+              https://hc-iptv-portal.onrender.com/healthz) && break
+            sleep 15
+          done
+          echo "healthz -> HTTP $code"
+          test "$code" = "200"
