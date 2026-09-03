@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { findDevice, updateDevice, normalizeMac, accessOf } from "../deviceStore";
+import { findUser } from "../storage";
 import {
   getRenewalConfig,
   setRenewalConfig,
@@ -246,6 +247,18 @@ router.put("/settings/renewal", async (req: Request, res: Response) => {
   if (b.promoPriceCents === null || typeof b.promoPriceCents === "number")
     patch.promoPriceCents = b.promoPriceCents;
   if (b.promoUntil === null || typeof b.promoUntil === "number") patch.promoUntil = b.promoUntil;
+  if (typeof b.trialEnabled === "boolean") patch.trialEnabled = b.trialEnabled;
+  if (typeof b.trialHours === "number") patch.trialHours = b.trialHours;
+  if (b.trialServerId === null || b.trialServerId === "") {
+    patch.trialServerId = null;
+  } else if (typeof b.trialServerId === "string") {
+    const srv = await findUser(b.trialServerId);
+    if (!srv) {
+      res.status(400).json({ error: "Servidor do teste grátis não existe." });
+      return;
+    }
+    patch.trialServerId = b.trialServerId;
+  }
   try {
     const cfg = await setRenewalConfig(patch);
     res.json({ ...cfg, effectivePriceCents: effectivePriceCents(cfg), providerConfigured: mpConfigured() });

@@ -13,11 +13,22 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getRenewalSettings, updateRenewalSettings } from "@/lib/api";
+import type { IptvUserWithCheck } from "@/lib/types";
+
+const NONE = "__none__";
 
 interface RenewalSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  servers: IptvUserWithCheck[];
 }
 
 const reaisToCents = (v: string) => Math.round(parseFloat(v.replace(",", ".")) * 100);
@@ -31,7 +42,7 @@ const tsToDate = (ts: number | null) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
-export function RenewalSettingsDialog({ open, onOpenChange }: RenewalSettingsDialogProps) {
+export function RenewalSettingsDialog({ open, onOpenChange, servers }: RenewalSettingsDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [providerOk, setProviderOk] = useState(false);
@@ -41,6 +52,9 @@ export function RenewalSettingsDialog({ open, onOpenChange }: RenewalSettingsDia
   const [promoOn, setPromoOn] = useState(false);
   const [promoPrice, setPromoPrice] = useState("");
   const [promoUntil, setPromoUntil] = useState("");
+  const [trialOn, setTrialOn] = useState(false);
+  const [trialServer, setTrialServer] = useState<string>(NONE);
+  const [trialHours, setTrialHours] = useState("1");
 
   useEffect(() => {
     if (!open) return;
@@ -55,6 +69,9 @@ export function RenewalSettingsDialog({ open, onOpenChange }: RenewalSettingsDia
         setPromoOn(hasPromo);
         setPromoPrice(s.promoPriceCents != null ? centsToReais(s.promoPriceCents) : "");
         setPromoUntil(tsToDate(s.promoUntil));
+        setTrialOn(s.trialEnabled);
+        setTrialServer(s.trialServerId ?? NONE);
+        setTrialHours(String(s.trialHours || 1));
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : "Erro ao carregar."))
       .finally(() => setLoading(false));
@@ -85,6 +102,15 @@ export function RenewalSettingsDialog({ open, onOpenChange }: RenewalSettingsDia
       patch.promoPriceCents = null;
       patch.promoUntil = null;
     }
+
+    if (trialOn && trialServer === NONE) {
+      toast.error("Escolha a linha que o teste grátis vai usar.");
+      return;
+    }
+    patch.trialEnabled = trialOn;
+    patch.trialServerId = trialOn && trialServer !== NONE ? trialServer : null;
+    patch.trialHours = Math.min(720, Math.max(1, parseInt(trialHours || "1", 10)));
+
     setSaving(true);
     try {
       const s = await updateRenewalSettings(patch);
@@ -207,6 +233,56 @@ export function RenewalSettingsDialog({ open, onOpenChange }: RenewalSettingsDia
                   </div>
                 </div>
               )}
+
+              <div className="mt-1 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={trialOn}
+                    onChange={(e) => setTrialOn(e.target.checked)}
+                    className="size-4 accent-primary"
+                  />
+                  Teste grátis automático para dispositivos novos
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  No 1º acesso de um aparelho ainda desconhecido, o portal libera sozinho por
+                  algumas horas. Vencido o prazo, o app mostra o QR de pagamento. Vale 1× por
+                  aparelho (reinstalar não reinicia — o ID vem do Android).
+                </p>
+                {trialOn && (
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <Label className="text-xs">Linha do teste</Label>
+                      <Select value={trialServer} onValueChange={setTrialServer}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Escolha um servidor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NONE}>Escolha um servidor</SelectItem>
+                          {servers.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.host} — {s.username}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-28">
+                      <Label htmlFor="r-trial-hours" className="text-xs">
+                        Horas
+                      </Label>
+                      <Input
+                        id="r-trial-hours"
+                        type="number"
+                        min={1}
+                        max={720}
+                        value={trialHours}
+                        onChange={(e) => setTrialHours(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           )}
 

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { findUser } from "../storage";
+import { getRenewalConfig } from "../paymentStore";
 import {
   readDevices,
   findDevice,
@@ -10,7 +11,10 @@ import {
   accessOf,
   isExpired,
   type Device,
+  type TrialGrant,
 } from "../deviceStore";
+
+const HOUR_MS = 3_600_000;
 
 const router = Router();
 
@@ -38,6 +42,7 @@ async function withServer(device: Device) {
     firstSeenAt: device.firstSeenAt,
     lastSeenAt: device.lastSeenAt,
     expiresAt: device.expiresAt,
+    trialStartedAt: device.trialStartedAt,
   };
   if (device.status !== "active" || ids.length === 0 || isExpired(device)) {
     return { ...base, server: null as ServerCreds | null, servers: [] as ServerCreds[] };
@@ -58,12 +63,36 @@ router.post("/devices/heartbeat", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const device = await upsertFromHeartbeat({
-      mac,
-      name: typeof body.name === "string" ? body.name : undefined,
-      model: typeof body.model === "string" ? body.model : undefined,
-      platform: typeof body.platform === "string" ? body.platform : undefined,
-    });
+    // Device NOVO + teste grátis ligado no portal -> já libera por trialHours
+    // na linha do teste. Device que já existe nunca ganha teste de novo.
+    let trialGrant: TrialGrant | undefined;
+    const existing = await findDevice(mac);
+    if (!existing) {
+      try {
+        const cfg = await getRenewalConfig();
+        if (cfg.trialEnabled && cfg.trialServerId && (cfg.trialHours ?? 0) > 0) {
+          const srv = await findUser(cfg.trialServerId);
+          if (srv) {
+            trialGrant = {
+              serverId: cfg.trialServerId,
+              expiresAt: Date.now() + (cfg.trialHours ?? 1) * HOUR_MS,
+            };
+          }
+        }
+      } catch {
+        /* settings indisponível -> sem teste, device entra como pending */
+      }
+    }
+
+    const device = await upsertFromHeartbeat(
+      {
+        mac,
+        name: typeof body.name === "string" ? body.name : undefined,
+        model: typeof body.model === "string" ? body.model : undefined,
+        platform: typeof body.platform === "string" ? body.platform : undefined,
+      },
+      trialGrant
+    );
     const payload = await withServer(device);
     res.json(payload);
   } catch (err) {

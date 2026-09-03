@@ -35,9 +35,22 @@ export interface RenewalConfig {
   /** Preço promocional opcional; usado enquanto `promoUntil` (epoch ms) > agora. */
   promoPriceCents?: number | null;
   promoUntil?: number | null;
+  /** Teste grátis: ao 1º heartbeat de um device NOVO, libera automaticamente
+   * por `trialHours` horas na linha `trialServerId`. Vencido, cai em "expired"
+   * e o Player mostra o QR de pagamento. Só vale 1x por device. */
+  trialEnabled?: boolean;
+  trialServerId?: string | null;
+  trialHours?: number;
 }
 
-const DEFAULT_CONFIG: RenewalConfig = { priceCents: 1990, months: 1, qrTtlMin: 30 };
+const DEFAULT_CONFIG: RenewalConfig = {
+  priceCents: 1990,
+  months: 1,
+  qrTtlMin: 30,
+  trialEnabled: false,
+  trialServerId: null,
+  trialHours: 1,
+};
 
 function ensureSb() {
   if (!supabaseEnabled()) {
@@ -65,6 +78,9 @@ function coerceConfig(v: unknown): RenewalConfig {
         : null,
     promoUntil:
       typeof o.promoUntil === "number" && Number.isFinite(o.promoUntil) ? o.promoUntil : null,
+    trialEnabled: o.trialEnabled === true,
+    trialServerId: typeof o.trialServerId === "string" && o.trialServerId ? o.trialServerId : null,
+    trialHours: Math.min(720, Math.max(1, Math.round(num(o.trialHours, DEFAULT_CONFIG.trialHours!)))),
   };
 }
 

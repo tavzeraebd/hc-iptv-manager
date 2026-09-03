@@ -43,6 +43,8 @@ update public.devices
    set bound_server_ids = to_jsonb(array[bound_server_id::text])
  where bound_server_id is not null
    and (bound_server_ids is null or bound_server_ids = '[]'::jsonb);
+-- teste grátis automático (concedido 1x no 1º heartbeat de um device novo):
+alter table public.devices add column if not exists trial_started_at bigint;
 
 create index if not exists devices_last_seen_idx on public.devices (last_seen_at desc);
 

@@ -37,6 +37,9 @@ export interface Device {
   boundServerIds: string[];
   /** Validade do acesso (epoch ms). null = sem validade (vitalício). */
   expiresAt: number | null;
+  /** Quando o teste grátis automático foi concedido a este device (epoch ms).
+   * null = nunca teve teste. Garante que o teste só é dado 1x por device. */
+  trialStartedAt: number | null;
 }
 
 export interface HeartbeatInput {
@@ -44,6 +47,13 @@ export interface HeartbeatInput {
   name?: string;
   model?: string;
   platform?: string;
+}
+
+/** Concessão de teste grátis a aplicar SÓ quando o device é criado agora (1º
+ * heartbeat). Montada na rota a partir de RenewalConfig. */
+export interface TrialGrant {
+  serverId: string;
+  expiresAt: number;
 }
 
 export interface DeviceAdminPatch {
@@ -174,6 +184,7 @@ function parseLine(line: string): Device | null {
       status: coerceStatus(p.status),
       boundServerIds: coerceServerIds(p.boundServerIds, p.boundServerId),
       expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null,
+      trialStartedAt: typeof p.trialStartedAt === "number" ? p.trialStartedAt : null,
     };
   } catch {
     return null;
@@ -202,7 +213,10 @@ async function fileFindDevice(mac: string): Promise<Device | null> {
   return devices.find((d) => d.mac === norm) ?? null;
 }
 
-async function fileUpsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
+async function fileUpsertFromHeartbeat(
+  input: HeartbeatInput,
+  trialGrant?: TrialGrant
+): Promise<Device> {
   const mac = normalizeMac(input.mac);
   if (!mac) throw new Error("MAC inválido.");
   const devices = await fileReadDevices();
@@ -217,9 +231,10 @@ async function fileUpsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
       platform: (input.platform ?? "").trim(),
       firstSeenAt: now,
       lastSeenAt: now,
-      status: "pending",
-      boundServerIds: [],
-      expiresAt: null,
+      status: trialGrant ? "active" : "pending",
+      boundServerIds: trialGrant ? [trialGrant.serverId] : [],
+      expiresAt: trialGrant ? trialGrant.expiresAt : null,
+      trialStartedAt: trialGrant ? now : null,
     };
     devices.push(created);
     await fileWriteDevices(devices);
@@ -258,6 +273,7 @@ async function fileUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<D
       status: "pending",
       boundServerIds: [],
       expiresAt: null,
+      trialStartedAt: null,
     });
     idx = devices.length - 1;
   }
@@ -302,6 +318,7 @@ interface DeviceRow {
   bound_server_id: string | null;
   bound_server_ids: unknown;
   expires_at: number | string | null;
+  trial_started_at: number | string | null;
 }
 
 function rowToDevice(r: DeviceRow): Device {
@@ -315,6 +332,7 @@ function rowToDevice(r: DeviceRow): Device {
     status: coerceStatus(r.status),
     boundServerIds: coerceServerIds(r.bound_server_ids, r.bound_server_id),
     expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
+    trialStartedAt: r.trial_started_at != null ? Number(r.trial_started_at) : null,
   };
 }
 
@@ -337,7 +355,10 @@ async function sbFindDevice(mac: string): Promise<Device | null> {
   return data ? rowToDevice(data as DeviceRow) : null;
 }
 
-async function sbUpsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
+async function sbUpsertFromHeartbeat(
+  input: HeartbeatInput,
+  trialGrant?: TrialGrant
+): Promise<Device> {
   const mac = normalizeMac(input.mac);
   if (!mac) throw new Error("MAC inválido.");
   const sb = await getSupabase();
@@ -355,16 +376,23 @@ async function sbUpsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
   if (upd.error) throw new Error(upd.error.message);
   if (upd.data) return rowToDevice(upd.data as DeviceRow);
 
-  // 2) não existe -> INSERE como pending.
-  const insertRow = {
+  // 2) não existe -> INSERE. Se houver teste grátis, já entra liberado por
+  //    trialHours na linha do teste; senão, pending (aguardando o admin).
+  const insertRow: Record<string, unknown> = {
     mac,
     name: (input.name ?? "").trim(),
     model: (input.model ?? "").trim(),
     platform: (input.platform ?? "").trim(),
     first_seen_at: now,
     last_seen_at: now,
-    status: "pending" as const,
+    status: trialGrant ? "active" : "pending",
   };
+  if (trialGrant) {
+    insertRow.bound_server_id = trialGrant.serverId;
+    insertRow.bound_server_ids = [trialGrant.serverId];
+    insertRow.expires_at = trialGrant.expiresAt;
+    insertRow.trial_started_at = now;
+  }
   const ins = await sb.from(TABLE).insert(insertRow).select("*").maybeSingle();
   if (!ins.error && ins.data) return rowToDevice(ins.data as DeviceRow);
   // 23505 = unique_violation: outro heartbeat inseriu no meio -> re-atualiza.
@@ -401,7 +429,13 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
     if (error && error.code !== "23505") throw new Error(error.message);
     existing =
       (await sbFindDevice(norm)) ??
-      rowToDevice({ ...base, bound_server_id: null, bound_server_ids: [], expires_at: null });
+      rowToDevice({
+        ...base,
+        bound_server_id: null,
+        bound_server_ids: [],
+        expires_at: null,
+        trial_started_at: null,
+      });
   }
 
   const upd: Record<string, unknown> = {};
@@ -453,8 +487,13 @@ export function findDevice(mac: string): Promise<Device | null> {
 
 // Cria (status "pending") ou atualiza os metadados + lastSeenAt. Nunca mexe em
 // status/boundServerId — isso é só via updateDevice (ação do admin).
-export function upsertFromHeartbeat(input: HeartbeatInput): Promise<Device> {
-  return supabaseEnabled() ? sbUpsertFromHeartbeat(input) : fileUpsertFromHeartbeat(input);
+export function upsertFromHeartbeat(
+  input: HeartbeatInput,
+  trialGrant?: TrialGrant
+): Promise<Device> {
+  return supabaseEnabled()
+    ? sbUpsertFromHeartbeat(input, trialGrant)
+    : fileUpsertFromHeartbeat(input, trialGrant);
 }
 
 // Cria o registro se ainda não existe (o admin pode pré-cadastrar um MAC antes

@@ -222,7 +222,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
           preselectServerId={devicesPreselect}
         />
 
-        <RenewalSettingsDialog open={renewalOpen} onOpenChange={setRenewalOpen} />
+        <RenewalSettingsDialog open={renewalOpen} onOpenChange={setRenewalOpen} servers={users} />
 
         <Toaster />
       </div>

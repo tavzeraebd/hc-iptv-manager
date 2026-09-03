@@ -202,6 +202,8 @@ export interface PortalDevice {
   lastSeenAt: number;
   /** Validade do acesso (epoch ms). null = sem validade (vitalício). */
   expiresAt: number | null;
+  /** Quando o teste grátis automático foi concedido (epoch ms). null = nunca teve. */
+  trialStartedAt: number | null;
 }
 
 export interface DevicePatch {
@@ -257,10 +259,24 @@ export interface RenewalSettings {
   promoUntil: number | null;
   effectivePriceCents: number;
   providerConfigured: boolean;
+  /** Teste grátis automático pra dispositivos novos (1º heartbeat). */
+  trialEnabled: boolean;
+  trialServerId: string | null;
+  trialHours: number;
 }
 
 export type RenewalSettingsPatch = Partial<
-  Pick<RenewalSettings, "priceCents" | "months" | "qrTtlMin" | "promoPriceCents" | "promoUntil">
+  Pick<
+    RenewalSettings,
+    | "priceCents"
+    | "months"
+    | "qrTtlMin"
+    | "promoPriceCents"
+    | "promoUntil"
+    | "trialEnabled"
+    | "trialServerId"
+    | "trialHours"
+  >
 >;
 
 export async function getRenewalSettings(): Promise<RenewalSettings> {
