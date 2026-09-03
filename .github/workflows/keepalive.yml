@@ -2,12 +2,14 @@ name: keep-alive
 
 # Pinga o /healthz do portal pra segurar o serviço free do Render acordado
 # (ele dorme após ~15 min sem tráfego). Cron do GitHub Actions costuma atrasar
-# alguns minutos em horário de pico — pra 100% sem dormir, use um serviço de
-# uptime externo (ex.: UptimeRobot free, check a cada 5 min) ou o plano pago.
+# alguns minutos em horário de pico — por isso rodamos a cada 5 min (mínimo do
+# GitHub), pra ter folga dentro da janela de 15 min mesmo com atraso. Pra 100%
+# sem dormir, some a isto um uptime externo (UptimeRobot free) ou o plano pago.
+# O Player também tem retry no cold start, então um atraso eventual é invisível.
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
