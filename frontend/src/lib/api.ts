@@ -18,12 +18,31 @@ const PORTAL_TOKEN_STORAGE_KEY = "iptv-manager-portal-token";
 // Por padrão o app já aponta para o portal hospedado (URL embutida e ofuscada
 // em baked-config). Um valor salvo em ⚙ Endereço do servidor tem prioridade;
 // "Voltar a usar o backend embarcado" grava EMBEDDED_BACKEND_URL explicitamente.
+// Um endereço salvo apontando pra localhost/127.x que NÃO seja o backend
+// embarcado (127.0.0.1:8891) é resquício de teste/dev — ignora e usa o portal
+// embutido. O embarcado legítimo e IPs de LAN reais (192.168.x) continuam OK.
+function isStaleServerUrl(u: string): boolean {
+  if (u === EMBEDDED_BACKEND_URL) return false;
+  let host: string;
+  try {
+    host = new URL(u).hostname.toLowerCase();
+  } catch {
+    return true;
+  }
+  return host === "localhost" || host === "0.0.0.0" || host === "::1" || host.startsWith("127.");
+}
+
 export function getServerUrl(): string {
-  return (
-    localStorage.getItem(SERVER_URL_STORAGE_KEY) ||
-    BAKED_PORTAL_URL ||
-    EMBEDDED_BACKEND_URL
-  );
+  const stored = localStorage.getItem(SERVER_URL_STORAGE_KEY);
+  if (stored && isStaleServerUrl(stored)) {
+    try {
+      localStorage.removeItem(SERVER_URL_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    return BAKED_PORTAL_URL || EMBEDDED_BACKEND_URL;
+  }
+  return stored || BAKED_PORTAL_URL || EMBEDDED_BACKEND_URL;
 }
 
 export function setServerUrl(url: string): void {

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nada do app é incluído em backup na nuvem nem em transferência entre
+  aparelhos. Evita que config antiga (ex.: "Endereço do servidor" de teste
+  apontando pra localhost) volte depois de reinstalar. Os dados reais ficam
+  no Supabase; o PIN é local e pode ser reconfigurado.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
