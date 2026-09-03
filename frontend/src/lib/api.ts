@@ -96,13 +96,47 @@ function apiUrl(path: string): string {
   return `${getServerUrl()}/api${path}`;
 }
 
-// Wrapper de fetch que injeta o token do portal (quando houver). Substitui
-// `fetch(apiUrl(path), init)` em todas as chamadas abaixo.
-function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// O portal roda no plano grátis do Render, que hiberna após ~15 min ociosos:
+// a 1ª chamada acorda a instância e por alguns segundos devolve timeout ou
+// 502/503/504 — cuja página de erro do Render NÃO tem `Access-Control-Allow-Origin`,
+// então a WebView reporta como "erro de CORS" mesmo estando tudo certo. Estas
+// tentativas com backoff cobrem o cold start; 2xx/3xx/4xx são respostas
+// definitivas e não são repetidas.
+const RETRY_DELAYS_MS = [4000, 9000, 18000];
+const REQUEST_TIMEOUT_MS = 25000;
+
+// Wrapper de fetch que injeta o token do portal (quando houver) e repete no
+// cold start do portal. Substitui `fetch(apiUrl(path), init)` em todas as
+// chamadas abaixo.
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const token = getPortalToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("x-portal-token", token);
-  return fetch(apiUrl(path), { ...init, headers });
+  const url = apiUrl(path);
+
+  let lastErr = new Error("Não foi possível falar com o servidor.");
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1]);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, headers, signal: ctrl.signal });
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      lastErr = new Error(`Servidor indisponível (HTTP ${res.status}).`);
+      continue;
+    }
+    return res;
+  }
+  throw lastErr;
 }
 
 async function handle<T>(response: Response): Promise<T> {
@@ -165,6 +199,84 @@ export async function checkUser(id: string): Promise<CheckResult> {
 export async function checkAllUsers(): Promise<{ id: string; check: CheckResult }[]> {
   const res = await apiFetch("/check-all", { method: "POST" });
   return handle(res);
+}
+
+// ---------------------------------------------------------------------------
+// Check client-side (direto do dispositivo)
+//
+// Muitos painéis (ex.: dns.explouddev.com) devolvem 404/403 para IPs de
+// datacenter — o portal no Render cai nisso e marca tudo OFFLINE — mas
+// respondem normalmente para uma conexão residencial. Como o app é servido em
+// http://localhost (androidScheme 'http' + cleartext) e o painel manda
+// `Access-Control-Allow-Origin: *`, a própria WebView consegue checar pela
+// conexão local do aparelho, que é a mesma que os Players dos clientes usam.
+// `use-iptv-users` tenta isto primeiro no app nativo e só cai pro backend se
+// der erro de rede.
+// ---------------------------------------------------------------------------
+
+const CLIENT_CHECK_TIMEOUT_MS = 9000;
+
+function panelApiUrl(host: string, username: string, password: string): string {
+  const clean = host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  const qs = new URLSearchParams({ username, password }).toString();
+  return `http://${clean}/player_api.php?${qs}`;
+}
+
+function statusFromExp(expDateSec: number, nowSec: number): CheckResult["status"] {
+  if (expDateSec <= nowSec) return "EXPIRADO";
+  if (expDateSec <= nowSec + 86400) return "VENCE_EM_BREVE";
+  return "ATIVO";
+}
+
+/**
+ * Checa o painel direto do dispositivo. Lança em erro de rede/timeout/CORS —
+ * o chamador deve cair pro check via backend nesse caso. Um retorno OFFLINE
+ * (404, JSON inválido, etc.) é definitivo e não deve tentar o backend.
+ */
+export async function clientCheckUser(
+  host: string,
+  username: string,
+  password: string
+): Promise<CheckResult> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CLIENT_CHECK_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(panelApiUrl(host, username, password), {
+      cache: "no-store",
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: `HTTP ${res.status}` };
+  }
+
+  let data: { user_info?: { exp_date?: string | number | null; auth?: number; status?: string } };
+  try {
+    data = await res.json();
+  } catch {
+    return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Resposta inválida da API" };
+  }
+
+  const info = data?.user_info;
+  if (!info || info.exp_date === undefined || info.exp_date === null) {
+    return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Resposta inválida da API" };
+  }
+
+  const expDate = Number(info.exp_date);
+  if (!Number.isFinite(expDate)) {
+    return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Data de expiração inválida" };
+  }
+
+  if (info.auth === 0 && info.status !== "Active") {
+    return { status: "EXPIRADO", expDate, checkedAt: nowSec, message: info.status };
+  }
+
+  return { status: statusFromExp(expDate, nowSec), expDate, checkedAt: nowSec };
 }
 
 export interface ImportCandidate {

@@ -154,7 +154,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
                   user={user}
                   onEdit={() => openEditForm(user)}
                   onDelete={() => setDeletingUser(user)}
-                  onRefresh={() => checkOne(user.id)}
+                  onRefresh={() => checkOne(user)}
                   onManageDevices={(id) => {
                     setDevicesPreselect(id);
                     setDevicesOpen(true);
