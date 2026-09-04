@@ -102,6 +102,23 @@ router.get("/users/:id/check", async (req: Request, res: Response) => {
   }
 });
 
+// Check por credenciais (sem precisar do usuário salvo). Usado pelo app nativo:
+// o backend embarcado roda na conexão local do aparelho, sem CORS e sem o
+// bloqueio de IP de datacenter que o portal sofre em alguns painéis.
+router.post("/check-creds", async (req: Request, res: Response) => {
+  const input = validateInput(req.body);
+  if (!input) {
+    res.status(400).json({ error: "host, username e password são obrigatórios." });
+    return;
+  }
+  try {
+    const check = await checkIptvUser(input.host, input.username, input.password);
+    res.json(check);
+  } catch {
+    res.status(500).json({ error: "Erro ao verificar credenciais." });
+  }
+});
+
 router.post("/check-all", async (_req: Request, res: Response) => {
   try {
     const users = await readUsers();

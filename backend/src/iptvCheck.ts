@@ -24,6 +24,49 @@ function computeStatus(expDate: number, now: number): IptvStatus {
   return "ATIVO";
 }
 
+// Contas revenda / "só M3U" não respondem `player_api.php` (200 com corpo
+// vazio), mas o `get.php` devolve a playlist normalmente. Lê só o começo e
+// aborta: se vier `#EXTM3U`, a conta está no ar (mas sem validade conhecida).
+function m3uPlaylistLoads(host: string, username: string, password: string): Promise<boolean> {
+  const cleanHost = host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  const params = new URLSearchParams({ username, password, type: "m3u_plus", output: "ts" });
+  const url = `http://${cleanHost}/get.php?${params.toString()}`;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (result: boolean) => {
+      if (done) return;
+      done = true;
+      resolve(result);
+    };
+    const req = http.get(
+      url,
+      { headers: { "User-Agent": BROWSER_USER_AGENT, Accept: "*/*" } },
+      (res) => {
+        const code = res.statusCode ?? 0;
+        if (code < 200 || code >= 300) {
+          req.destroy();
+          finish(false);
+          return;
+        }
+        let acc = "";
+        res.on("data", (chunk: Buffer) => {
+          acc += chunk.toString("utf-8");
+          if (acc.length >= 8192) {
+            req.destroy();
+            finish(/#EXTM3U/i.test(acc));
+          }
+        });
+        res.on("end", () => finish(/#EXTM3U/i.test(acc)));
+      }
+    );
+    req.setTimeout(TIMEOUT_MS, () => {
+      req.destroy();
+      finish(false);
+    });
+    req.on("error", () => finish(false));
+  });
+}
+
 interface RawResponse {
   statusCode: number;
   body: string;
@@ -72,26 +115,36 @@ export async function checkIptvUser(
   const now = Math.floor(Date.now() / 1000);
   const url = buildUrl(host, username, password);
 
+  // player_api.php sem resposta útil (vazio / JSON quebrado / sem user_info):
+  // pode ser conta revenda que só serve M3U. Confere a playlist antes de
+  // cravar OFFLINE.
+  const m3uFallback = async (message: string): Promise<CheckResult> => {
+    if (await m3uPlaylistLoads(host, username, password)) {
+      return { status: "ATIVO", expDate: null, checkedAt: now, message: "Painel só serve M3U (sem validade)" };
+    }
+    return { status: "OFFLINE", expDate: null, checkedAt: now, message };
+  };
+
   try {
     const response = await fetchRaw(url, TIMEOUT_MS);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return { status: "OFFLINE", expDate: null, checkedAt: now, message: `HTTP ${response.statusCode}` };
     }
 
-    if (!response.body) {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Resposta vazia do servidor" };
+    if (!response.body || !response.body.trim()) {
+      return m3uFallback("Sem resposta do player_api");
     }
 
     let data: { user_info?: { exp_date?: string | number | null; auth?: number; status?: string } };
     try {
       data = JSON.parse(response.body);
     } catch {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Resposta inválida da API" };
+      return m3uFallback("Resposta inválida da API");
     }
 
     const userInfo = data?.user_info;
     if (!userInfo || typeof userInfo.exp_date === "undefined" || userInfo.exp_date === null) {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Resposta inválida da API" };
+      return m3uFallback("Resposta inválida da API");
     }
 
     const expDate = Number(userInfo.exp_date);

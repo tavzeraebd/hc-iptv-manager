@@ -214,7 +214,7 @@ export async function checkAllUsers(): Promise<{ id: string; check: CheckResult 
 // der erro de rede.
 // ---------------------------------------------------------------------------
 
-const CLIENT_CHECK_TIMEOUT_MS = 9000;
+const CLIENT_CHECK_TIMEOUT_MS = 13000;
 
 function panelApiUrl(host: string, username: string, password: string): string {
   const clean = host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
@@ -229,9 +229,12 @@ function statusFromExp(expDateSec: number, nowSec: number): CheckResult["status"
 }
 
 /**
- * Checa o painel direto do dispositivo. Lança em erro de rede/timeout/CORS —
- * o chamador deve cair pro check via backend nesse caso. Um retorno OFFLINE
- * (404, JSON inválido, etc.) é definitivo e não deve tentar o backend.
+ * Checa o painel `player_api.php` direto do dispositivo (conexão local). O
+ * painel manda `Access-Control-Allow-Origin: *` nessa rota, então a WebView
+ * consegue. Retorna OFFLINE (sem lançar) quando o `player_api.php` não dá uma
+ * resposta útil — inclusive corpo vazio (conta revenda que só serve M3U) ou
+ * ERR_EMPTY_RESPONSE — pro chamador tentar o check via backend do aparelho,
+ * que faz o fallback de M3U server-side (o `get.php` NÃO tem CORS).
  */
 export async function clientCheckUser(
   host: string,
@@ -255,9 +258,14 @@ export async function clientCheckUser(
     return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: `HTTP ${res.status}` };
   }
 
+  const body = (await res.text()).trim();
+  if (!body) {
+    return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Sem resposta do player_api" };
+  }
+
   let data: { user_info?: { exp_date?: string | number | null; auth?: number; status?: string } };
   try {
-    data = await res.json();
+    data = JSON.parse(body);
   } catch {
     return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Resposta inválida da API" };
   }
@@ -279,6 +287,32 @@ export async function clientCheckUser(
   return { status: statusFromExp(expDate, nowSec), expDate, checkedAt: nowSec };
 }
 
+/**
+ * Check por credenciais no backend embarcado do aparelho (`127.0.0.1:8891`,
+ * sempre no ar via nodejs-mobile). Roda server-side pela conexão local do
+ * aparelho — sem CORS e sem o bloqueio de IP de datacenter do portal — e faz
+ * o fallback de playlist M3U pra contas que não respondem `player_api.php`.
+ */
+export async function checkCredsViaDevice(
+  host: string,
+  username: string,
+  password: string
+): Promise<CheckResult> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CLIENT_CHECK_TIMEOUT_MS + 4000);
+  try {
+    const res = await fetch(`${EMBEDDED_BACKEND_URL}/api/check-creds`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host, username, password }),
+      signal: ctrl.signal,
+    });
+    return handle<CheckResult>(res);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface ImportCandidate {
   host: string;
   username: string;
@@ -288,13 +322,24 @@ export interface ImportCandidate {
   alreadyExists: boolean;
 }
 
+// Domínios que aparecem nesses JSON no formato host:porta/user/pass mas NÃO
+// são painéis Xtream — CDN / player de terceiros / canal avulso. Filtrado
+// também no backend; aqui garante que some da tela mesmo com portal antigo.
+const NON_PANEL_DOMAINS = ["vivatele.com", "streamlock.net", "zas.media"];
+
+function isNonPanelHost(hostWithPort: string): boolean {
+  const host = (hostWithPort.split(":")[0] || "").toLowerCase();
+  return NON_PANEL_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
+}
+
 export async function previewImport(url: string): Promise<ImportCandidate[]> {
   const res = await apiFetch("/import/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
   });
-  return handle(res);
+  const candidates = await handle<ImportCandidate[]>(res);
+  return candidates.filter((c) => !isNonPanelHost(c.host));
 }
 
 export async function importUsers(

@@ -23107,9 +23107,13 @@ async function sbDeleteUser(id) {
   return (data?.length ?? 0) > 0;
 }
 async function sbFindUser(id) {
+  if (!UUID_RE.test(id)) return null;
   const sb = await getSupabase();
   const { data, error } = await sb.from(TABLE).select("*").eq("id", id).maybeSingle();
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.code === "22P02") return null;
+    throw new Error(error.message);
+  }
   return data ? rowToUser(data) : null;
 }
 function readUsers() {
@@ -23127,7 +23131,7 @@ function deleteUser(id) {
 function findUser(id) {
   return supabaseEnabled() ? sbFindUser(id) : fileFindUser(id);
 }
-var import_fs, import_path, import_crypto, DATA_DIR, DATA_FILE, TABLE;
+var import_fs, import_path, import_crypto, DATA_DIR, DATA_FILE, TABLE, UUID_RE;
 var init_storage = __esm({
   "src/storage.ts"() {
     "use strict";
@@ -23138,6 +23142,7 @@ var init_storage = __esm({
     DATA_DIR = process.env.DATA_DIR || import_path.default.join(__dirname, "..", "..", "data");
     DATA_FILE = import_path.default.join(DATA_DIR, "usuarios.txt");
     TABLE = "iptv_users";
+    UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   }
 });
 
@@ -23151,6 +23156,45 @@ function computeStatus(expDate, now) {
   if (expDate <= now) return "EXPIRADO";
   if (expDate <= now + 86400) return "VENCE_EM_BREVE";
   return "ATIVO";
+}
+function m3uPlaylistLoads(host, username, password) {
+  const cleanHost = host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  const params = new URLSearchParams({ username, password, type: "m3u_plus", output: "ts" });
+  const url = `http://${cleanHost}/get.php?${params.toString()}`;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      resolve(result);
+    };
+    const req = import_http.default.get(
+      url,
+      { headers: { "User-Agent": BROWSER_USER_AGENT, Accept: "*/*" } },
+      (res) => {
+        const code = res.statusCode ?? 0;
+        if (code < 200 || code >= 300) {
+          req.destroy();
+          finish(false);
+          return;
+        }
+        let acc = "";
+        res.on("data", (chunk) => {
+          acc += chunk.toString("utf-8");
+          if (acc.length >= 8192) {
+            req.destroy();
+            finish(/#EXTM3U/i.test(acc));
+          }
+        });
+        res.on("end", () => finish(/#EXTM3U/i.test(acc)));
+      }
+    );
+    req.setTimeout(TIMEOUT_MS, () => {
+      req.destroy();
+      finish(false);
+    });
+    req.on("error", () => finish(false));
+  });
 }
 function fetchRaw(url, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -23187,23 +23231,29 @@ function fetchRaw(url, timeoutMs) {
 async function checkIptvUser(host, username, password) {
   const now = Math.floor(Date.now() / 1e3);
   const url = buildUrl(host, username, password);
+  const m3uFallback = async (message) => {
+    if (await m3uPlaylistLoads(host, username, password)) {
+      return { status: "ATIVO", expDate: null, checkedAt: now, message: "Painel s\xF3 serve M3U (sem validade)" };
+    }
+    return { status: "OFFLINE", expDate: null, checkedAt: now, message };
+  };
   try {
     const response = await fetchRaw(url, TIMEOUT_MS);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return { status: "OFFLINE", expDate: null, checkedAt: now, message: `HTTP ${response.statusCode}` };
     }
-    if (!response.body) {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Resposta vazia do servidor" };
+    if (!response.body || !response.body.trim()) {
+      return m3uFallback("Sem resposta do player_api");
     }
     let data;
     try {
       data = JSON.parse(response.body);
     } catch {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Resposta inv\xE1lida da API" };
+      return m3uFallback("Resposta inv\xE1lida da API");
     }
     const userInfo = data?.user_info;
     if (!userInfo || typeof userInfo.exp_date === "undefined" || userInfo.exp_date === null) {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Resposta inv\xE1lida da API" };
+      return m3uFallback("Resposta inv\xE1lida da API");
     }
     const expDate = Number(userInfo.exp_date);
     if (!Number.isFinite(expDate)) {
@@ -23230,6 +23280,10 @@ var init_iptvCheck = __esm({
 });
 
 // src/importSource.ts
+function isNonPanelHost(hostWithPort) {
+  const host = hostWithPort.split(":")[0].toLowerCase();
+  return NON_PANEL_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
+}
 async function fetchImportCandidates(sourceUrl) {
   const response = await fetch(sourceUrl, {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -23250,6 +23304,7 @@ async function fetchImportCandidates(sourceUrl) {
       const match = source.link.match(XTREAM_LINK_RE);
       if (!match) continue;
       const host = match[2];
+      if (isNonPanelHost(host)) continue;
       const username = match[3];
       const password = match[4];
       const key = `${host}|${username}|${password}`;
@@ -23269,13 +23324,14 @@ async function fetchImportCandidates(sourceUrl) {
   }
   return [...grouped.values()].sort((a, b) => b.channelCount - a.channelCount);
 }
-var DEFAULT_IMPORT_URL, FETCH_TIMEOUT_MS, XTREAM_LINK_RE;
+var DEFAULT_IMPORT_URL, FETCH_TIMEOUT_MS, XTREAM_LINK_RE, NON_PANEL_DOMAINS;
 var init_importSource = __esm({
   "src/importSource.ts"() {
     "use strict";
     DEFAULT_IMPORT_URL = "https://explouddev.com/api/canais/todos";
     FETCH_TIMEOUT_MS = 1e4;
     XTREAM_LINK_RE = /^(https?):\/\/([^/]+:\d+)\/(?:(?:live|movie|series)\/)?([^/]+)\/([^/]+)\/([^/?]+?)(?:\.[a-z0-9]+)?(?:\?.*)?$/i;
+    NON_PANEL_DOMAINS = ["vivatele.com", "streamlock.net", "zas.media"];
   }
 });
 
@@ -23371,6 +23427,19 @@ var init_users = __esm({
         res.status(500).json({ error: "Erro ao verificar usu\xE1rio." });
       }
     });
+    router.post("/check-creds", async (req, res) => {
+      const input = validateInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "host, username e password s\xE3o obrigat\xF3rios." });
+        return;
+      }
+      try {
+        const check = await checkIptvUser(input.host, input.username, input.password);
+        res.json(check);
+      } catch {
+        res.status(500).json({ error: "Erro ao verificar credenciais." });
+      }
+    });
     router.post("/check-all", async (_req, res) => {
       try {
         const users = await readUsers();
@@ -23427,421 +23496,6 @@ var init_users = __esm({
   }
 });
 
-// src/deviceStore.ts
-function normalizeMac(raw) {
-  if (typeof raw !== "string") return null;
-  const hex = raw.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
-  if (hex.length !== 12) return null;
-  return hex.match(/.{2}/g).join(":");
-}
-function coerceStatus(v) {
-  return v === "active" || v === "disabled" ? v : "pending";
-}
-function isExpired(d, now = Date.now()) {
-  return d.expiresAt != null && d.expiresAt <= now;
-}
-function accessOf(d, now = Date.now()) {
-  if (d.status === "disabled") return "disabled";
-  if (d.status === "pending") return "pending";
-  return isExpired(d, now) ? "expired" : "active";
-}
-function resolveExpiry(current, patch, now) {
-  if (patch.expiresAt !== void 0) return patch.expiresAt;
-  if (patch.extendDays && patch.extendDays > 0) {
-    const base = current != null && current > now ? current : now;
-    return base + patch.extendDays * DAY_MS;
-  }
-  if (patch.status === "active" && (current == null || current <= now)) {
-    const days = patch.defaultValidityDays && patch.defaultValidityDays > 0 ? patch.defaultValidityDays : DEFAULT_VALIDITY_DAYS;
-    return now + days * DAY_MS;
-  }
-  return void 0;
-}
-async function ensureDataFile2() {
-  await import_fs2.promises.mkdir(DATA_DIR2, { recursive: true });
-  try {
-    await import_fs2.promises.access(DATA_FILE2);
-  } catch {
-    await import_fs2.promises.writeFile(DATA_FILE2, "", "utf-8");
-  }
-}
-function parseLine2(line) {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  try {
-    const p = JSON.parse(trimmed);
-    const mac = normalizeMac(p.mac);
-    if (!mac) return null;
-    return {
-      mac,
-      name: typeof p.name === "string" ? p.name : "",
-      model: typeof p.model === "string" ? p.model : "",
-      platform: typeof p.platform === "string" ? p.platform : "",
-      firstSeenAt: typeof p.firstSeenAt === "number" ? p.firstSeenAt : Date.now(),
-      lastSeenAt: typeof p.lastSeenAt === "number" ? p.lastSeenAt : Date.now(),
-      status: coerceStatus(p.status),
-      boundServerId: typeof p.boundServerId === "string" ? p.boundServerId : void 0,
-      expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null
-    };
-  } catch {
-    return null;
-  }
-}
-async function fileReadDevices() {
-  await ensureDataFile2();
-  const content = await import_fs2.promises.readFile(DATA_FILE2, "utf-8");
-  return content.split("\n").map(parseLine2).filter((d) => d !== null);
-}
-async function fileWriteDevices(devices) {
-  await ensureDataFile2();
-  const content = devices.map((d) => JSON.stringify(d)).join("\n") + (devices.length ? "\n" : "");
-  const tmpFile = `${DATA_FILE2}.${process.pid}.${Date.now()}.tmp`;
-  await import_fs2.promises.writeFile(tmpFile, content, "utf-8");
-  await import_fs2.promises.rename(tmpFile, DATA_FILE2);
-}
-async function fileFindDevice(mac) {
-  const norm = normalizeMac(mac);
-  if (!norm) return null;
-  const devices = await fileReadDevices();
-  return devices.find((d) => d.mac === norm) ?? null;
-}
-async function fileUpsertFromHeartbeat(input) {
-  const mac = normalizeMac(input.mac);
-  if (!mac) throw new Error("MAC inv\xE1lido.");
-  const devices = await fileReadDevices();
-  const now = Date.now();
-  const idx = devices.findIndex((d) => d.mac === mac);
-  if (idx === -1) {
-    const created = {
-      mac,
-      name: (input.name ?? "").trim(),
-      model: (input.model ?? "").trim(),
-      platform: (input.platform ?? "").trim(),
-      firstSeenAt: now,
-      lastSeenAt: now,
-      status: "pending",
-      expiresAt: null
-    };
-    devices.push(created);
-    await fileWriteDevices(devices);
-    return created;
-  }
-  const existing = devices[idx];
-  const updated = {
-    ...existing,
-    name: input.name != null && input.name.trim() ? input.name.trim() : existing.name,
-    model: input.model != null && input.model.trim() ? input.model.trim() : existing.model,
-    platform: input.platform != null && input.platform.trim() ? input.platform.trim() : existing.platform,
-    lastSeenAt: now
-  };
-  devices[idx] = updated;
-  await fileWriteDevices(devices);
-  return updated;
-}
-async function fileUpdateDevice(mac, patch) {
-  const norm = normalizeMac(mac);
-  if (!norm) return null;
-  const devices = await fileReadDevices();
-  const now = Date.now();
-  let idx = devices.findIndex((d) => d.mac === norm);
-  if (idx === -1) {
-    devices.push({
-      mac: norm,
-      name: "",
-      model: "",
-      platform: "",
-      firstSeenAt: now,
-      lastSeenAt: 0,
-      status: "pending",
-      expiresAt: null
-    });
-    idx = devices.length - 1;
-  }
-  const cur = devices[idx];
-  const next = { ...cur };
-  if (patch.name != null) next.name = patch.name.trim();
-  if (patch.status === "pending" || patch.status === "active" || patch.status === "disabled") {
-    next.status = patch.status;
-  }
-  if (patch.boundServerId === null) {
-    delete next.boundServerId;
-  } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
-    next.boundServerId = patch.boundServerId;
-  }
-  const resolvedExp = resolveExpiry(cur.expiresAt, patch, now);
-  if (resolvedExp !== void 0) next.expiresAt = resolvedExp;
-  devices[idx] = next;
-  await fileWriteDevices(devices);
-  return next;
-}
-async function fileDeleteDevice(mac) {
-  const norm = normalizeMac(mac);
-  if (!norm) return false;
-  const devices = await fileReadDevices();
-  const filtered = devices.filter((d) => d.mac !== norm);
-  if (filtered.length === devices.length) return false;
-  await fileWriteDevices(filtered);
-  return true;
-}
-function rowToDevice(r) {
-  return {
-    mac: normalizeMac(r.mac) ?? r.mac,
-    name: r.name ?? "",
-    model: r.model ?? "",
-    platform: r.platform ?? "",
-    firstSeenAt: Number(r.first_seen_at) || Date.now(),
-    lastSeenAt: Number(r.last_seen_at) || 0,
-    status: coerceStatus(r.status),
-    boundServerId: r.bound_server_id ?? void 0,
-    expiresAt: r.expires_at != null ? Number(r.expires_at) : null
-  };
-}
-async function sbReadDevices() {
-  const sb = await getSupabase();
-  const { data, error } = await sb.from(TABLE2).select("*").order("last_seen_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => rowToDevice(r));
-}
-async function sbFindDevice(mac) {
-  const norm = normalizeMac(mac);
-  if (!norm) return null;
-  const sb = await getSupabase();
-  const { data, error } = await sb.from(TABLE2).select("*").eq("mac", norm).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? rowToDevice(data) : null;
-}
-async function sbUpsertFromHeartbeat(input) {
-  const mac = normalizeMac(input.mac);
-  if (!mac) throw new Error("MAC inv\xE1lido.");
-  const sb = await getSupabase();
-  const now = Date.now();
-  const meta = { last_seen_at: now };
-  if (input.name != null && input.name.trim()) meta.name = input.name.trim();
-  if (input.model != null && input.model.trim()) meta.model = input.model.trim();
-  if (input.platform != null && input.platform.trim()) meta.platform = input.platform.trim();
-  const upd = await sb.from(TABLE2).update(meta).eq("mac", mac).select("*").maybeSingle();
-  if (upd.error) throw new Error(upd.error.message);
-  if (upd.data) return rowToDevice(upd.data);
-  const insertRow = {
-    mac,
-    name: (input.name ?? "").trim(),
-    model: (input.model ?? "").trim(),
-    platform: (input.platform ?? "").trim(),
-    first_seen_at: now,
-    last_seen_at: now,
-    status: "pending"
-  };
-  const ins = await sb.from(TABLE2).insert(insertRow).select("*").maybeSingle();
-  if (!ins.error && ins.data) return rowToDevice(ins.data);
-  if (ins.error && ins.error.code !== "23505") throw new Error(ins.error.message);
-  const again = await sb.from(TABLE2).update(meta).eq("mac", mac).select("*").maybeSingle();
-  if (again.error) throw new Error(again.error.message);
-  if (again.data) return rowToDevice(again.data);
-  const found = await sbFindDevice(mac);
-  if (found) return found;
-  throw new Error("N\xE3o foi poss\xEDvel registrar o dispositivo.");
-}
-async function sbUpdateDevice(mac, patch) {
-  const norm = normalizeMac(mac);
-  if (!norm) return null;
-  const sb = await getSupabase();
-  const now = Date.now();
-  let existing = await sbFindDevice(norm);
-  if (!existing) {
-    const base = {
-      mac: norm,
-      name: "",
-      model: "",
-      platform: "",
-      first_seen_at: now,
-      last_seen_at: 0,
-      status: "pending"
-    };
-    const { error: error2 } = await sb.from(TABLE2).insert(base);
-    if (error2 && error2.code !== "23505") throw new Error(error2.message);
-    existing = await sbFindDevice(norm) ?? rowToDevice({ ...base, bound_server_id: null, expires_at: null });
-  }
-  const upd = {};
-  if (patch.name != null) upd.name = patch.name.trim();
-  if (patch.status === "pending" || patch.status === "active" || patch.status === "disabled") {
-    upd.status = patch.status;
-  }
-  if (patch.boundServerId === null) {
-    upd.bound_server_id = null;
-  } else if (typeof patch.boundServerId === "string" && patch.boundServerId) {
-    upd.bound_server_id = patch.boundServerId;
-  }
-  const resolvedExp = resolveExpiry(existing.expiresAt, patch, now);
-  if (resolvedExp !== void 0) upd.expires_at = resolvedExp;
-  if (Object.keys(upd).length === 0) return existing;
-  const { data, error } = await sb.from(TABLE2).update(upd).eq("mac", norm).select("*").maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? rowToDevice(data) : existing;
-}
-async function sbDeleteDevice(mac) {
-  const norm = normalizeMac(mac);
-  if (!norm) return false;
-  const sb = await getSupabase();
-  const { data, error } = await sb.from(TABLE2).delete().eq("mac", norm).select("mac");
-  if (error) throw new Error(error.message);
-  return (data?.length ?? 0) > 0;
-}
-function readDevices() {
-  return supabaseEnabled() ? sbReadDevices() : fileReadDevices();
-}
-function findDevice(mac) {
-  return supabaseEnabled() ? sbFindDevice(mac) : fileFindDevice(mac);
-}
-function upsertFromHeartbeat(input) {
-  return supabaseEnabled() ? sbUpsertFromHeartbeat(input) : fileUpsertFromHeartbeat(input);
-}
-function updateDevice(mac, patch) {
-  return supabaseEnabled() ? sbUpdateDevice(mac, patch) : fileUpdateDevice(mac, patch);
-}
-function deleteDevice(mac) {
-  return supabaseEnabled() ? sbDeleteDevice(mac) : fileDeleteDevice(mac);
-}
-var import_fs2, import_path2, DATA_DIR2, DATA_FILE2, TABLE2, DAY_MS, DEFAULT_VALIDITY_DAYS;
-var init_deviceStore = __esm({
-  "src/deviceStore.ts"() {
-    "use strict";
-    import_fs2 = require("fs");
-    import_path2 = __toESM(require("path"));
-    init_supabase();
-    DATA_DIR2 = process.env.DATA_DIR || import_path2.default.join(__dirname, "..", "..", "data");
-    DATA_FILE2 = import_path2.default.join(DATA_DIR2, "devices.txt");
-    TABLE2 = "devices";
-    DAY_MS = 864e5;
-    DEFAULT_VALIDITY_DAYS = 30;
-  }
-});
-
-// src/routes/devices.ts
-async function withServer(device) {
-  const base = {
-    mac: device.mac,
-    name: device.name,
-    model: device.model,
-    platform: device.platform,
-    status: device.status,
-    access: accessOf(device),
-    boundServerId: device.boundServerId ?? null,
-    firstSeenAt: device.firstSeenAt,
-    lastSeenAt: device.lastSeenAt,
-    expiresAt: device.expiresAt
-  };
-  if (device.status !== "active" || !device.boundServerId || isExpired(device)) {
-    return { ...base, server: null };
-  }
-  const user = await findUser(device.boundServerId);
-  if (!user) return { ...base, server: null };
-  return {
-    ...base,
-    server: { host: user.host, username: user.username, password: user.password }
-  };
-}
-function withAccess(d) {
-  return { ...d, boundServerId: d.boundServerId ?? null, access: accessOf(d) };
-}
-var import_express2, router2, devices_default;
-var init_devices = __esm({
-  "src/routes/devices.ts"() {
-    "use strict";
-    import_express2 = __toESM(require_express2());
-    init_storage();
-    init_deviceStore();
-    router2 = (0, import_express2.Router)();
-    router2.post("/devices/heartbeat", async (req, res) => {
-      const body = req.body ?? {};
-      const mac = normalizeMac(body.mac);
-      if (!mac) {
-        res.status(400).json({ error: "MAC inv\xE1lido." });
-        return;
-      }
-      try {
-        const device = await upsertFromHeartbeat({
-          mac,
-          name: typeof body.name === "string" ? body.name : void 0,
-          model: typeof body.model === "string" ? body.model : void 0,
-          platform: typeof body.platform === "string" ? body.platform : void 0
-        });
-        const payload = await withServer(device);
-        res.json(payload);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Erro ao registrar o dispositivo.";
-        res.status(500).json({ error: message });
-      }
-    });
-    router2.get("/devices", async (_req, res) => {
-      try {
-        const devices = await readDevices();
-        devices.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
-        res.json(devices.map(withAccess));
-      } catch {
-        res.status(500).json({ error: "N\xE3o foi poss\xEDvel carregar os dispositivos." });
-      }
-    });
-    router2.get("/devices/:mac", async (req, res) => {
-      const device = await findDevice(req.params.mac);
-      if (!device) {
-        res.status(404).json({ error: "Dispositivo n\xE3o encontrado." });
-        return;
-      }
-      res.json(withAccess(device));
-    });
-    router2.put("/devices/:mac", async (req, res) => {
-      const mac = normalizeMac(req.params.mac);
-      if (!mac) {
-        res.status(400).json({ error: "MAC inv\xE1lido." });
-        return;
-      }
-      const body = req.body ?? {};
-      let boundServerId;
-      if (body.boundServerId === null || body.boundServerId === "") {
-        boundServerId = null;
-      } else if (typeof body.boundServerId === "string") {
-        const user = await findUser(body.boundServerId);
-        if (!user) {
-          res.status(400).json({ error: "Servidor vinculado n\xE3o existe." });
-          return;
-        }
-        boundServerId = body.boundServerId;
-      }
-      const status = body.status === "pending" || body.status === "active" || body.status === "disabled" ? body.status : void 0;
-      let expiresAt;
-      if (body.expiresAt === null) {
-        expiresAt = null;
-      } else if (typeof body.expiresAt === "number" && Number.isFinite(body.expiresAt)) {
-        expiresAt = body.expiresAt;
-      }
-      const extendDays = typeof body.extendDays === "number" && body.extendDays > 0 ? body.extendDays : void 0;
-      const defaultValidityDays = typeof body.validityDays === "number" && body.validityDays > 0 ? body.validityDays : void 0;
-      try {
-        const updated = await updateDevice(mac, {
-          name: typeof body.name === "string" ? body.name : void 0,
-          boundServerId,
-          status,
-          expiresAt,
-          extendDays,
-          defaultValidityDays
-        });
-        res.json(updated ? withAccess(updated) : updated);
-      } catch {
-        res.status(500).json({ error: "Erro ao atualizar o dispositivo." });
-      }
-    });
-    router2.delete("/devices/:mac", async (req, res) => {
-      const ok = await deleteDevice(req.params.mac);
-      if (!ok) {
-        res.status(404).json({ error: "Dispositivo n\xE3o encontrado." });
-        return;
-      }
-      res.status(204).end();
-    });
-    devices_default = router2;
-  }
-});
-
 // src/paymentStore.ts
 function ensureSb() {
   if (!supabaseEnabled()) {
@@ -23858,7 +23512,10 @@ function coerceConfig(v) {
     months: Math.max(1, Math.round(num(o.months, DEFAULT_CONFIG.months))),
     qrTtlMin: Math.min(60, Math.max(5, Math.round(num(o.qrTtlMin, DEFAULT_CONFIG.qrTtlMin)))),
     promoPriceCents: typeof o.promoPriceCents === "number" && o.promoPriceCents >= 100 ? Math.round(o.promoPriceCents) : null,
-    promoUntil: typeof o.promoUntil === "number" && Number.isFinite(o.promoUntil) ? o.promoUntil : null
+    promoUntil: typeof o.promoUntil === "number" && Number.isFinite(o.promoUntil) ? o.promoUntil : null,
+    trialEnabled: o.trialEnabled === true,
+    trialServerId: typeof o.trialServerId === "string" && o.trialServerId ? o.trialServerId : null,
+    trialHours: Math.min(720, Math.max(1, Math.round(num(o.trialHours, DEFAULT_CONFIG.trialHours))))
   };
 }
 async function getRenewalConfig() {
@@ -23972,7 +23629,514 @@ var init_paymentStore = __esm({
     init_supabase();
     PAYMENTS = "payments";
     SETTINGS = "portal_settings";
-    DEFAULT_CONFIG = { priceCents: 1990, months: 1, qrTtlMin: 30 };
+    DEFAULT_CONFIG = {
+      priceCents: 1990,
+      months: 1,
+      qrTtlMin: 30,
+      trialEnabled: false,
+      trialServerId: null,
+      trialHours: 1
+    };
+  }
+});
+
+// src/deviceStore.ts
+function normalizeMac(raw) {
+  if (typeof raw !== "string") return null;
+  const hex = raw.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+  if (hex.length !== 12) return null;
+  return hex.match(/.{2}/g).join(":");
+}
+function coerceStatus(v) {
+  return v === "active" || v === "disabled" ? v : "pending";
+}
+function coerceServerIds(raw, legacy) {
+  const arr = Array.isArray(raw) ? raw : typeof legacy === "string" && legacy ? [legacy] : [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const v of arr) {
+    if (typeof v === "string" && v && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+function resolveBoundServerIds(current, patch) {
+  if (patch.boundServerIds !== void 0) {
+    return patch.boundServerIds === null ? [] : coerceServerIds(patch.boundServerIds);
+  }
+  if (patch.boundServerId !== void 0) {
+    return patch.boundServerId ? [patch.boundServerId] : [];
+  }
+  return void 0;
+}
+function isExpired(d, now = Date.now()) {
+  return d.expiresAt != null && d.expiresAt <= now;
+}
+function accessOf(d, now = Date.now()) {
+  if (d.status === "disabled") return "disabled";
+  if (d.status === "pending") return "pending";
+  return isExpired(d, now) ? "expired" : "active";
+}
+function resolveExpiry(current, patch, now) {
+  if (patch.expiresAt !== void 0) return patch.expiresAt;
+  if (patch.extendDays && patch.extendDays > 0) {
+    const base = current != null && current > now ? current : now;
+    return base + patch.extendDays * DAY_MS;
+  }
+  if (patch.status === "active" && (current == null || current <= now)) {
+    const days = patch.defaultValidityDays && patch.defaultValidityDays > 0 ? patch.defaultValidityDays : DEFAULT_VALIDITY_DAYS;
+    return now + days * DAY_MS;
+  }
+  return void 0;
+}
+async function ensureDataFile2() {
+  await import_fs2.promises.mkdir(DATA_DIR2, { recursive: true });
+  try {
+    await import_fs2.promises.access(DATA_FILE2);
+  } catch {
+    await import_fs2.promises.writeFile(DATA_FILE2, "", "utf-8");
+  }
+}
+function parseLine2(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  try {
+    const p = JSON.parse(trimmed);
+    const mac = normalizeMac(p.mac);
+    if (!mac) return null;
+    return {
+      mac,
+      name: typeof p.name === "string" ? p.name : "",
+      model: typeof p.model === "string" ? p.model : "",
+      platform: typeof p.platform === "string" ? p.platform : "",
+      firstSeenAt: typeof p.firstSeenAt === "number" ? p.firstSeenAt : Date.now(),
+      lastSeenAt: typeof p.lastSeenAt === "number" ? p.lastSeenAt : Date.now(),
+      status: coerceStatus(p.status),
+      boundServerIds: coerceServerIds(p.boundServerIds, p.boundServerId),
+      expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null,
+      trialStartedAt: typeof p.trialStartedAt === "number" ? p.trialStartedAt : null
+    };
+  } catch {
+    return null;
+  }
+}
+async function fileReadDevices() {
+  await ensureDataFile2();
+  const content = await import_fs2.promises.readFile(DATA_FILE2, "utf-8");
+  return content.split("\n").map(parseLine2).filter((d) => d !== null);
+}
+async function fileWriteDevices(devices) {
+  await ensureDataFile2();
+  const content = devices.map((d) => JSON.stringify(d)).join("\n") + (devices.length ? "\n" : "");
+  const tmpFile = `${DATA_FILE2}.${process.pid}.${Date.now()}.tmp`;
+  await import_fs2.promises.writeFile(tmpFile, content, "utf-8");
+  await import_fs2.promises.rename(tmpFile, DATA_FILE2);
+}
+async function fileFindDevice(mac) {
+  const norm = normalizeMac(mac);
+  if (!norm) return null;
+  const devices = await fileReadDevices();
+  return devices.find((d) => d.mac === norm) ?? null;
+}
+async function fileUpsertFromHeartbeat(input, trialGrant) {
+  const mac = normalizeMac(input.mac);
+  if (!mac) throw new Error("MAC inv\xE1lido.");
+  const devices = await fileReadDevices();
+  const now = Date.now();
+  const idx = devices.findIndex((d) => d.mac === mac);
+  if (idx === -1) {
+    const created = {
+      mac,
+      name: (input.name ?? "").trim(),
+      model: (input.model ?? "").trim(),
+      platform: (input.platform ?? "").trim(),
+      firstSeenAt: now,
+      lastSeenAt: now,
+      status: trialGrant ? "active" : "pending",
+      boundServerIds: trialGrant ? [trialGrant.serverId] : [],
+      expiresAt: trialGrant ? trialGrant.expiresAt : null,
+      trialStartedAt: trialGrant ? now : null
+    };
+    devices.push(created);
+    await fileWriteDevices(devices);
+    return created;
+  }
+  const existing = devices[idx];
+  const updated = {
+    ...existing,
+    name: input.name != null && input.name.trim() ? input.name.trim() : existing.name,
+    model: input.model != null && input.model.trim() ? input.model.trim() : existing.model,
+    platform: input.platform != null && input.platform.trim() ? input.platform.trim() : existing.platform,
+    lastSeenAt: now
+  };
+  devices[idx] = updated;
+  await fileWriteDevices(devices);
+  return updated;
+}
+async function fileUpdateDevice(mac, patch) {
+  const norm = normalizeMac(mac);
+  if (!norm) return null;
+  const devices = await fileReadDevices();
+  const now = Date.now();
+  let idx = devices.findIndex((d) => d.mac === norm);
+  if (idx === -1) {
+    devices.push({
+      mac: norm,
+      name: "",
+      model: "",
+      platform: "",
+      firstSeenAt: now,
+      lastSeenAt: 0,
+      status: "pending",
+      boundServerIds: [],
+      expiresAt: null,
+      trialStartedAt: null
+    });
+    idx = devices.length - 1;
+  }
+  const cur = devices[idx];
+  const next = { ...cur };
+  if (patch.name != null) next.name = patch.name.trim();
+  if (patch.status === "pending" || patch.status === "active" || patch.status === "disabled") {
+    next.status = patch.status;
+  }
+  const resolvedIds = resolveBoundServerIds(cur.boundServerIds, patch);
+  if (resolvedIds !== void 0) next.boundServerIds = resolvedIds;
+  const resolvedExp = resolveExpiry(cur.expiresAt, patch, now);
+  if (resolvedExp !== void 0) next.expiresAt = resolvedExp;
+  devices[idx] = next;
+  await fileWriteDevices(devices);
+  return next;
+}
+async function fileDeleteDevice(mac) {
+  const norm = normalizeMac(mac);
+  if (!norm) return false;
+  const devices = await fileReadDevices();
+  const filtered = devices.filter((d) => d.mac !== norm);
+  if (filtered.length === devices.length) return false;
+  await fileWriteDevices(filtered);
+  return true;
+}
+function rowToDevice(r) {
+  return {
+    mac: normalizeMac(r.mac) ?? r.mac,
+    name: r.name ?? "",
+    model: r.model ?? "",
+    platform: r.platform ?? "",
+    firstSeenAt: Number(r.first_seen_at) || Date.now(),
+    lastSeenAt: Number(r.last_seen_at) || 0,
+    status: coerceStatus(r.status),
+    boundServerIds: coerceServerIds(r.bound_server_ids, r.bound_server_id),
+    expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
+    trialStartedAt: r.trial_started_at != null ? Number(r.trial_started_at) : null
+  };
+}
+async function sbReadDevices() {
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(TABLE2).select("*").order("last_seen_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => rowToDevice(r));
+}
+async function sbFindDevice(mac) {
+  const norm = normalizeMac(mac);
+  if (!norm) return null;
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(TABLE2).select("*").eq("mac", norm).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? rowToDevice(data) : null;
+}
+async function sbUpsertFromHeartbeat(input, trialGrant) {
+  const mac = normalizeMac(input.mac);
+  if (!mac) throw new Error("MAC inv\xE1lido.");
+  const sb = await getSupabase();
+  const now = Date.now();
+  const meta = { last_seen_at: now };
+  if (input.name != null && input.name.trim()) meta.name = input.name.trim();
+  if (input.model != null && input.model.trim()) meta.model = input.model.trim();
+  if (input.platform != null && input.platform.trim()) meta.platform = input.platform.trim();
+  const upd = await sb.from(TABLE2).update(meta).eq("mac", mac).select("*").maybeSingle();
+  if (upd.error) throw new Error(upd.error.message);
+  if (upd.data) return rowToDevice(upd.data);
+  const insertRow = {
+    mac,
+    name: (input.name ?? "").trim(),
+    model: (input.model ?? "").trim(),
+    platform: (input.platform ?? "").trim(),
+    first_seen_at: now,
+    last_seen_at: now,
+    status: trialGrant ? "active" : "pending"
+  };
+  if (trialGrant) {
+    insertRow.bound_server_id = trialGrant.serverId;
+    insertRow.bound_server_ids = [trialGrant.serverId];
+    insertRow.expires_at = trialGrant.expiresAt;
+    insertRow.trial_started_at = now;
+  }
+  const ins = await sb.from(TABLE2).insert(insertRow).select("*").maybeSingle();
+  if (!ins.error && ins.data) return rowToDevice(ins.data);
+  if (ins.error && ins.error.code !== "23505") throw new Error(ins.error.message);
+  const again = await sb.from(TABLE2).update(meta).eq("mac", mac).select("*").maybeSingle();
+  if (again.error) throw new Error(again.error.message);
+  if (again.data) return rowToDevice(again.data);
+  const found = await sbFindDevice(mac);
+  if (found) return found;
+  throw new Error("N\xE3o foi poss\xEDvel registrar o dispositivo.");
+}
+async function sbUpdateDevice(mac, patch) {
+  const norm = normalizeMac(mac);
+  if (!norm) return null;
+  const sb = await getSupabase();
+  const now = Date.now();
+  let existing = await sbFindDevice(norm);
+  if (!existing) {
+    const base = {
+      mac: norm,
+      name: "",
+      model: "",
+      platform: "",
+      first_seen_at: now,
+      last_seen_at: 0,
+      status: "pending"
+    };
+    const { error: error2 } = await sb.from(TABLE2).insert(base);
+    if (error2 && error2.code !== "23505") throw new Error(error2.message);
+    existing = await sbFindDevice(norm) ?? rowToDevice({
+      ...base,
+      bound_server_id: null,
+      bound_server_ids: [],
+      expires_at: null,
+      trial_started_at: null
+    });
+  }
+  const upd = {};
+  if (patch.name != null) upd.name = patch.name.trim();
+  if (patch.status === "pending" || patch.status === "active" || patch.status === "disabled") {
+    upd.status = patch.status;
+  }
+  const resolvedIds = resolveBoundServerIds(existing.boundServerIds, patch);
+  if (resolvedIds !== void 0) {
+    upd.bound_server_ids = resolvedIds;
+    upd.bound_server_id = resolvedIds[0] ?? null;
+  }
+  const resolvedExp = resolveExpiry(existing.expiresAt, patch, now);
+  if (resolvedExp !== void 0) upd.expires_at = resolvedExp;
+  if (Object.keys(upd).length === 0) return existing;
+  const { data, error } = await sb.from(TABLE2).update(upd).eq("mac", norm).select("*").maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? rowToDevice(data) : existing;
+}
+async function sbDeleteDevice(mac) {
+  const norm = normalizeMac(mac);
+  if (!norm) return false;
+  const sb = await getSupabase();
+  const { data, error } = await sb.from(TABLE2).delete().eq("mac", norm).select("mac");
+  if (error) throw new Error(error.message);
+  return (data?.length ?? 0) > 0;
+}
+function readDevices() {
+  return supabaseEnabled() ? sbReadDevices() : fileReadDevices();
+}
+function findDevice(mac) {
+  return supabaseEnabled() ? sbFindDevice(mac) : fileFindDevice(mac);
+}
+function upsertFromHeartbeat(input, trialGrant) {
+  return supabaseEnabled() ? sbUpsertFromHeartbeat(input, trialGrant) : fileUpsertFromHeartbeat(input, trialGrant);
+}
+function updateDevice(mac, patch) {
+  return supabaseEnabled() ? sbUpdateDevice(mac, patch) : fileUpdateDevice(mac, patch);
+}
+function deleteDevice(mac) {
+  return supabaseEnabled() ? sbDeleteDevice(mac) : fileDeleteDevice(mac);
+}
+var import_fs2, import_path2, DATA_DIR2, DATA_FILE2, TABLE2, DAY_MS, DEFAULT_VALIDITY_DAYS;
+var init_deviceStore = __esm({
+  "src/deviceStore.ts"() {
+    "use strict";
+    import_fs2 = require("fs");
+    import_path2 = __toESM(require("path"));
+    init_supabase();
+    DATA_DIR2 = process.env.DATA_DIR || import_path2.default.join(__dirname, "..", "..", "data");
+    DATA_FILE2 = import_path2.default.join(DATA_DIR2, "devices.txt");
+    TABLE2 = "devices";
+    DAY_MS = 864e5;
+    DEFAULT_VALIDITY_DAYS = 30;
+  }
+});
+
+// src/routes/devices.ts
+async function withServer(device) {
+  const ids = device.boundServerIds;
+  const base = {
+    mac: device.mac,
+    name: device.name,
+    model: device.model,
+    platform: device.platform,
+    status: device.status,
+    access: accessOf(device),
+    boundServerId: ids[0] ?? null,
+    boundServerIds: ids,
+    firstSeenAt: device.firstSeenAt,
+    lastSeenAt: device.lastSeenAt,
+    expiresAt: device.expiresAt,
+    trialStartedAt: device.trialStartedAt
+  };
+  if (device.status !== "active" || ids.length === 0 || isExpired(device)) {
+    return { ...base, server: null, servers: [] };
+  }
+  const resolved = await Promise.all(ids.map((id) => findUser(id)));
+  const servers = resolved.filter((u) => !!u).map((u) => ({ host: u.host, username: u.username, password: u.password }));
+  return { ...base, server: servers[0] ?? null, servers };
+}
+function withAccess(d) {
+  return {
+    ...d,
+    boundServerId: d.boundServerIds[0] ?? null,
+    boundServerIds: d.boundServerIds,
+    access: accessOf(d)
+  };
+}
+var import_express2, HOUR_MS, router2, devices_default;
+var init_devices = __esm({
+  "src/routes/devices.ts"() {
+    "use strict";
+    import_express2 = __toESM(require_express2());
+    init_storage();
+    init_paymentStore();
+    init_deviceStore();
+    HOUR_MS = 36e5;
+    router2 = (0, import_express2.Router)();
+    router2.post("/devices/heartbeat", async (req, res) => {
+      const body = req.body ?? {};
+      const mac = normalizeMac(body.mac);
+      if (!mac) {
+        res.status(400).json({ error: "MAC inv\xE1lido." });
+        return;
+      }
+      try {
+        let trialGrant;
+        const existing = await findDevice(mac);
+        if (!existing) {
+          try {
+            const cfg = await getRenewalConfig();
+            if (cfg.trialEnabled && cfg.trialServerId && (cfg.trialHours ?? 0) > 0) {
+              const srv = await findUser(cfg.trialServerId);
+              if (srv) {
+                trialGrant = {
+                  serverId: cfg.trialServerId,
+                  expiresAt: Date.now() + (cfg.trialHours ?? 1) * HOUR_MS
+                };
+              }
+            }
+          } catch {
+          }
+        }
+        const device = await upsertFromHeartbeat(
+          {
+            mac,
+            name: typeof body.name === "string" ? body.name : void 0,
+            model: typeof body.model === "string" ? body.model : void 0,
+            platform: typeof body.platform === "string" ? body.platform : void 0
+          },
+          trialGrant
+        );
+        const payload = await withServer(device);
+        res.json(payload);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erro ao registrar o dispositivo.";
+        res.status(500).json({ error: message });
+      }
+    });
+    router2.get("/devices", async (_req, res) => {
+      try {
+        const devices = await readDevices();
+        devices.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+        res.json(devices.map(withAccess));
+      } catch {
+        res.status(500).json({ error: "N\xE3o foi poss\xEDvel carregar os dispositivos." });
+      }
+    });
+    router2.get("/devices/:mac", async (req, res) => {
+      try {
+        const device = await findDevice(req.params.mac);
+        if (!device) {
+          res.status(404).json({ error: "Dispositivo n\xE3o encontrado." });
+          return;
+        }
+        res.json(withAccess(device));
+      } catch {
+        res.status(500).json({ error: "N\xE3o foi poss\xEDvel carregar o dispositivo." });
+      }
+    });
+    router2.put("/devices/:mac", async (req, res) => {
+      const mac = normalizeMac(req.params.mac);
+      if (!mac) {
+        res.status(400).json({ error: "MAC inv\xE1lido." });
+        return;
+      }
+      const body = req.body ?? {};
+      try {
+        let boundServerId;
+        if (body.boundServerId === null || body.boundServerId === "") {
+          boundServerId = null;
+        } else if (typeof body.boundServerId === "string") {
+          const user = await findUser(body.boundServerId);
+          if (!user) {
+            res.status(400).json({ error: "Servidor vinculado n\xE3o existe." });
+            return;
+          }
+          boundServerId = body.boundServerId;
+        }
+        let boundServerIds;
+        if (body.boundServerIds === null) {
+          boundServerIds = null;
+        } else if (Array.isArray(body.boundServerIds)) {
+          const seen = /* @__PURE__ */ new Set();
+          const ids = [];
+          for (const raw of body.boundServerIds) {
+            if (typeof raw !== "string" || !raw || seen.has(raw)) continue;
+            if (!await findUser(raw)) {
+              res.status(400).json({ error: `Servidor ${raw} n\xE3o existe.` });
+              return;
+            }
+            seen.add(raw);
+            ids.push(raw);
+          }
+          boundServerIds = ids;
+        }
+        const status = body.status === "pending" || body.status === "active" || body.status === "disabled" ? body.status : void 0;
+        let expiresAt;
+        if (body.expiresAt === null) {
+          expiresAt = null;
+        } else if (typeof body.expiresAt === "number" && Number.isFinite(body.expiresAt)) {
+          expiresAt = body.expiresAt;
+        }
+        const extendDays = typeof body.extendDays === "number" && body.extendDays > 0 ? body.extendDays : void 0;
+        const defaultValidityDays = typeof body.validityDays === "number" && body.validityDays > 0 ? body.validityDays : void 0;
+        const updated = await updateDevice(mac, {
+          name: typeof body.name === "string" ? body.name : void 0,
+          boundServerId,
+          boundServerIds,
+          status,
+          expiresAt,
+          extendDays,
+          defaultValidityDays
+        });
+        res.json(updated ? withAccess(updated) : updated);
+      } catch {
+        res.status(500).json({ error: "Erro ao atualizar o dispositivo." });
+      }
+    });
+    router2.delete("/devices/:mac", async (req, res) => {
+      const ok = await deleteDevice(req.params.mac);
+      if (!ok) {
+        res.status(404).json({ error: "Dispositivo n\xE3o encontrado." });
+        return;
+      }
+      res.status(204).end();
+    });
+    devices_default = router2;
   }
 });
 
@@ -24092,6 +24256,7 @@ var init_payments = __esm({
     "use strict";
     import_express3 = __toESM(require_express2());
     init_deviceStore();
+    init_storage();
     init_paymentStore();
     init_mercadopago();
     router3 = (0, import_express3.Router)();
@@ -24134,7 +24299,7 @@ var init_payments = __esm({
           res.status(404).json({ error: "Dispositivo n\xE3o encontrado." });
           return;
         }
-        if (!device.boundServerId) {
+        if (device.boundServerIds.length === 0) {
           res.status(409).json({
             error: "Dispositivo ainda n\xE3o foi liberado pelo provedor. Fale com o suporte."
           });
@@ -24269,6 +24434,18 @@ var init_payments = __esm({
       if (b.promoPriceCents === null || typeof b.promoPriceCents === "number")
         patch.promoPriceCents = b.promoPriceCents;
       if (b.promoUntil === null || typeof b.promoUntil === "number") patch.promoUntil = b.promoUntil;
+      if (typeof b.trialEnabled === "boolean") patch.trialEnabled = b.trialEnabled;
+      if (typeof b.trialHours === "number") patch.trialHours = b.trialHours;
+      if (b.trialServerId === null || b.trialServerId === "") {
+        patch.trialServerId = null;
+      } else if (typeof b.trialServerId === "string") {
+        const srv = await findUser(b.trialServerId);
+        if (!srv) {
+          res.status(400).json({ error: "Servidor do teste gr\xE1tis n\xE3o existe." });
+          return;
+        }
+        patch.trialServerId = b.trialServerId;
+      }
       try {
         const cfg = await setRenewalConfig(patch);
         res.json({ ...cfg, effectivePriceCents: effectivePriceCents(cfg), providerConfigured: mpConfigured() });
@@ -24342,6 +24519,9 @@ var init_server = __esm({
     init_adminAuth();
     init_supabase();
     init_mercadopago();
+    process.on("unhandledRejection", (reason) => {
+      console.error("unhandledRejection:", reason);
+    });
     app = (0, import_express4.default)();
     PORT = Number(process.env.PORT) || 3001;
     HOST = process.env.HOST || "0.0.0.0";

@@ -9,6 +9,7 @@ import {
   checkUser as apiCheckUser,
   checkAllUsers as apiCheckAllUsers,
   clientCheckUser,
+  checkCredsViaDevice,
   importUsers as apiImportUsers,
   waitForEmbeddedBackend,
 } from "@/lib/api";
@@ -17,16 +18,25 @@ import type { UserInput } from "@/lib/api";
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
-// No app nativo, checa o painel direto do aparelho (conexão residencial, a
-// mesma dos Players dos clientes). Só cai pro check via portal se der erro de
-// rede/CORS — o portal roda em IP de datacenter, que vários painéis (ex.:
-// dns.explouddev.com) devolvem 404, marcando tudo OFFLINE por engano.
+// No app nativo, checa o painel pela conexão local do aparelho (a mesma dos
+// Players dos clientes) — nunca pelo portal, que roda em IP de datacenter e
+// vários painéis (ex.: dns.explouddev.com) devolvem 404, marcando tudo OFFLINE.
+//   1. fetch direto do `player_api.php` na WebView (rápido, traz a validade);
+//   2. se não vier resposta útil, backend embarcado do aparelho — server-side,
+//      com fallback de playlist M3U pra contas revenda que não têm player_api;
+//   3. só então o portal, como último recurso.
 async function resolveCheck(u: IptvUser): Promise<CheckResult> {
   if (Capacitor.isNativePlatform()) {
     try {
-      return await clientCheckUser(u.host, u.username, u.password);
+      const direct = await clientCheckUser(u.host, u.username, u.password);
+      if (direct.status !== "OFFLINE") return direct;
     } catch {
-      /* rede/CORS/timeout no aparelho — tenta pelo portal */
+      /* ERR_EMPTY_RESPONSE / timeout — tenta pelo backend do aparelho */
+    }
+    try {
+      return await checkCredsViaDevice(u.host, u.username, u.password);
+    } catch {
+      /* backend embarcado indisponível — último recurso: portal */
     }
   }
   return apiCheckUser(u.id);
