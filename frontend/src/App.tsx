@@ -16,6 +16,7 @@ import { DevicesDialog } from "@/components/devices-dialog";
 import { RenewalSettingsDialog } from "@/components/renewal-settings-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
+import { useDevices } from "@/hooks/use-devices";
 import { useIptvUsers } from "@/hooks/use-iptv-users";
 import { useTheme } from "@/hooks/use-theme";
 import type { IptvUserWithCheck } from "@/lib/types";
@@ -52,6 +53,11 @@ function Dashboard({ onLock }: { onLock: () => void }) {
     importUsers,
   } = useIptvUsers();
   const { theme, toggleTheme } = useTheme();
+  // Levantado pra cá (em vez de só dentro do diálogo de Dispositivos) porque a
+  // tabela de servidores também precisa saber, pra cada linha, quantos dos
+  // SEUS dispositivos estão vinculados/online/assistindo — sempre do nosso
+  // portal, nunca do endpoint do painel do provedor.
+  const devicesState = useDevices(true);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("TODOS");
@@ -147,6 +153,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
           ) : (
             <UserTable
               users={visibleUsers}
+              devices={devicesState.devices}
               onEdit={openEditForm}
               onDelete={setDeletingUser}
               onRefresh={checkOne}
@@ -213,6 +220,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
           onOpenChange={setDevicesOpen}
           servers={users}
           preselectServerId={devicesPreselect}
+          {...devicesState}
         />
 
         <RenewalSettingsDialog open={renewalOpen} onOpenChange={setRenewalOpen} servers={users} />

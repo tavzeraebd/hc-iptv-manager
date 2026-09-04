@@ -263,15 +263,7 @@ export async function clientCheckUser(
     return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Sem resposta do player_api" };
   }
 
-  let data: {
-    user_info?: {
-      exp_date?: string | number | null;
-      auth?: number;
-      status?: string;
-      active_cons?: string | number | null;
-      max_connections?: string | number | null;
-    };
-  };
+  let data: { user_info?: { exp_date?: string | number | null; auth?: number; status?: string } };
   try {
     data = JSON.parse(body);
   } catch {
@@ -283,23 +275,16 @@ export async function clientCheckUser(
     return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Resposta inválida da API" };
   }
 
-  const activeConns = Number(info.active_cons);
-  const maxConnections = Number(info.max_connections);
-  const conns = {
-    activeConns: Number.isFinite(activeConns) ? activeConns : null,
-    maxConnections: Number.isFinite(maxConnections) ? maxConnections : null,
-  };
-
   const expDate = Number(info.exp_date);
   if (!Number.isFinite(expDate)) {
-    return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Data de expiração inválida", ...conns };
+    return { status: "OFFLINE", expDate: null, checkedAt: nowSec, message: "Data de expiração inválida" };
   }
 
   if (info.auth === 0 && info.status !== "Active") {
-    return { status: "EXPIRADO", expDate, checkedAt: nowSec, message: info.status, ...conns };
+    return { status: "EXPIRADO", expDate, checkedAt: nowSec, message: info.status };
   }
 
-  return { status: statusFromExp(expDate, nowSec), expDate, checkedAt: nowSec, ...conns };
+  return { status: statusFromExp(expDate, nowSec), expDate, checkedAt: nowSec };
 }
 
 /**

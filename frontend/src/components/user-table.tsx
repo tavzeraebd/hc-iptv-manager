@@ -25,11 +25,16 @@ import { cn } from "@/lib/utils";
 import { STATUS_CONFIG } from "@/lib/status";
 import { formatExpDate, formatTimeRemaining } from "@/lib/format";
 import { copyToClipboard } from "@/lib/clipboard";
+import { lineConnectionStats } from "@/lib/device-status";
 import { StatusDot } from "@/components/status-dot";
+import type { PortalDevice } from "@/lib/api";
 import type { IptvUserWithCheck } from "@/lib/types";
 
 interface UserTableProps {
   users: IptvUserWithCheck[];
+  /** Dispositivos do portal — a coluna Conexões é calculada 100% daqui (nunca
+   * do endpoint do painel do provedor). */
+  devices: PortalDevice[];
   onEdit: (user: IptvUserWithCheck) => void;
   onDelete: (user: IptvUserWithCheck) => void;
   onRefresh: (user: IptvUserWithCheck) => void;
@@ -57,6 +62,7 @@ function CopyBtn({ label, value }: { label: string; value: string }) {
 
 function UserRow({
   user,
+  devices,
   revealAll,
   onEdit,
   onDelete,
@@ -64,6 +70,7 @@ function UserRow({
   onManageDevices,
 }: {
   user: IptvUserWithCheck;
+  devices: PortalDevice[];
   revealAll: boolean;
   onEdit: () => void;
   onDelete: () => void;
@@ -97,37 +104,39 @@ function UserRow({
         )}
       </td>
 
-      {/* Conexões ativas AGORA nessa linha, segundo o próprio painel — conta
-          qualquer aparelho usando a credencial, não só os dispositivos
-          cadastrados aqui. Clique abre "Dispositivos" filtrado nesta linha. */}
+      {/* Conexões: 100% dado nosso (dispositivos cadastrados + heartbeat do
+          Player) — nunca o endpoint do painel do provedor, que atrasa/falha.
+          "assistindo/vinculados". Clique abre "Dispositivos" nesta linha. */}
       <td className="whitespace-nowrap px-3 py-2">
-        {showSkeleton ? (
-          <Skeleton className="h-5 w-14" />
-        ) : check?.activeConns != null ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => onManageDevices(user.id)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset transition-colors hover:opacity-80",
-                  check.maxConnections != null && check.activeConns >= check.maxConnections
-                    ? "bg-destructive/10 text-destructive ring-destructive/20"
-                    : check.activeConns > 0
+        {(() => {
+          const stats = lineConnectionStats(devices, user.id);
+          if (stats.bound === 0) {
+            return <span className="text-xs text-muted-foreground">—</span>;
+          }
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => onManageDevices(user.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset transition-colors hover:opacity-80",
+                    stats.watching > 0
                       ? "bg-orange-500/10 text-orange-600 ring-orange-500/20 dark:text-orange-400"
                       : "bg-muted text-muted-foreground ring-border"
-                )}
-              >
-                <MonitorSmartphone className="size-3" />
-                {check.activeConns}
-                {check.maxConnections != null ? `/${check.maxConnections}` : ""}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Ver dispositivos vinculados a esta linha</TooltipContent>
-          </Tooltip>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        )}
+                  )}
+                >
+                  <MonitorSmartphone className="size-3" />
+                  {stats.watching}/{stats.bound}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {stats.watching} assistindo agora de {stats.bound} dispositivo{stats.bound === 1 ? "" : "s"} seu
+                {stats.bound === 1 ? "" : "s"} vinculado{stats.bound === 1 ? "" : "s"} · ver dispositivos
+              </TooltipContent>
+            </Tooltip>
+          );
+        })()}
       </td>
 
       {/* Servidor */}
@@ -233,7 +242,7 @@ function UserRow({
   );
 }
 
-export function UserTable({ users, onEdit, onDelete, onRefresh, onManageDevices }: UserTableProps) {
+export function UserTable({ users, devices, onEdit, onDelete, onRefresh, onManageDevices }: UserTableProps) {
   const [revealAll, setRevealAll] = useState(false);
 
   return (
@@ -250,10 +259,9 @@ export function UserTable({ users, onEdit, onDelete, onRefresh, onManageDevices 
                     <Info className="size-3 shrink-0 text-muted-foreground/70" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-64">
-                    Número informado pelo painel do provedor — de qualquer aparelho usando a
-                    credencial, não só os seus. Alguns painéis atrasam ou falham em contar direito;
-                    pra saber com certeza quem está vendo o quê, use "Assistindo agora" na tela de
-                    Dispositivos (esse dado vem do seu Player, não do painel).
+                    "Assistindo agora / vinculados" — dado 100% seu, vindo do heartbeat dos seus
+                    dispositivos (não do painel do provedor, que costuma atrasar ou falhar na
+                    contagem). Não conta aparelhos de terceiros usando a mesma credencial por fora.
                   </TooltipContent>
                 </Tooltip>
               </span>
@@ -283,6 +291,7 @@ export function UserTable({ users, onEdit, onDelete, onRefresh, onManageDevices 
             <UserRow
               key={user.id}
               user={user}
+              devices={devices}
               revealAll={revealAll}
               onEdit={() => onEdit(user)}
               onDelete={() => onDelete(user)}

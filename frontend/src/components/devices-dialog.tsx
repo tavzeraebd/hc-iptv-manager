@@ -39,15 +39,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useDevices } from "@/hooks/use-devices";
 import {
   getDevice,
   updateDevice,
   type DeviceAccess,
+  type DevicePatch,
   type DeviceStatus,
   type NowPlaying,
   type PortalDevice,
 } from "@/lib/api";
+import { isDeviceOnline, lineConnectionStats } from "@/lib/device-status";
 import type { IptvUserWithCheck } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -57,14 +58,24 @@ interface DevicesDialogProps {
   servers: IptvUserWithCheck[];
   /** Servidor pré-selecionado ao abrir por "Vincular dispositivo" de um card. */
   preselectServerId?: string | null;
+  // Estado de dispositivos levantado pro App.tsx (a tabela de servidores
+  // também usa, pra mostrar conexões por linha) — ver hooks/use-devices.
+  devices: PortalDevice[];
+  loading: boolean;
+  error: string | null;
+  reload: (quiet?: boolean) => void;
+  setServers: (mac: string, ids: string[]) => Promise<PortalDevice>;
+  rename: (mac: string, name: string) => Promise<PortalDevice>;
+  setStatus: (mac: string, status: DeviceStatus) => Promise<PortalDevice>;
+  extend: (mac: string, days: number) => Promise<PortalDevice>;
+  setExpiry: (mac: string, expiresAt: number | null) => Promise<PortalDevice>;
+  remove: (mac: string) => Promise<void>;
+  patch: (mac: string, p: DevicePatch) => Promise<PortalDevice>;
 }
 
 const NONE = "__none__";
 const DAY = 86_400_000;
 const DEFAULT_DAYS = 30;
-// O Player pinga a cada ~60s enquanto assiste (pareado) — folga de 3 min pra
-// considerar "online agora" sem marcar offline por um ping perdido.
-const ONLINE_MS = 3 * 60 * 1000;
 
 const NOW_PLAYING_LABEL: Record<NowPlaying["kind"], string> = {
   live: "Ao vivo",
@@ -133,10 +144,23 @@ function fromDateInput(v: string): number | null {
   return Number.isNaN(d.getTime()) ? null : d.getTime();
 }
 
-export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }: DevicesDialogProps) {
-  const { devices, loading, error, reload, setServers, rename, setStatus, extend, setExpiry, remove, patch } =
-    useDevices(open);
-
+export function DevicesDialog({
+  open,
+  onOpenChange,
+  servers,
+  preselectServerId,
+  devices,
+  loading,
+  error,
+  reload,
+  setServers,
+  rename,
+  setStatus,
+  extend,
+  setExpiry,
+  remove,
+  patch,
+}: DevicesDialogProps) {
   const serverLabel = useMemo(() => {
     const m = new Map<string, string>();
     servers.forEach((s) => m.set(s.id, `${s.host} — ${s.username}`));
@@ -156,9 +180,10 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
     () => (preselectServerId ? devices.filter((d) => d.boundServerIds.includes(preselectServerId)) : []),
     [devices, preselectServerId]
   );
-  const lineOnlineCount = useMemo(
-    () => lineDevices.filter((d) => Date.now() - d.lastSeenAt < ONLINE_MS).length,
-    [lineDevices]
+  // 100% dado nosso (heartbeat) — nunca o active_cons do painel do provedor.
+  const lineStats = useMemo(
+    () => (preselectServerId ? lineConnectionStats(devices, preselectServerId) : null),
+    [devices, preselectServerId]
   );
   const visibleDevices = onlyThisLine && preselectServerId ? lineDevices : devices;
   const filteredToOneLine = onlyThisLine && Boolean(preselectServerId);
@@ -245,20 +270,17 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
               <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-muted-foreground">
                   Linha <span className="font-medium text-foreground">{serverLabel.get(lineServer.id)}</span>
-                  {lineServer.check?.activeConns != null && (
-                    <>
-                      {" · "}
-                      <span className="font-medium text-foreground">
-                        {lineServer.check.activeConns}
-                        {lineServer.check.maxConnections != null ? `/${lineServer.check.maxConnections}` : ""}
-                      </span>{" "}
-                      conexões ativas no painel (qualquer aparelho, não só os seus)
-                    </>
-                  )}
                   {" · "}
                   {lineDevices.length} dispositivo{lineDevices.length === 1 ? "" : "s"} seu
                   {lineDevices.length === 1 ? "" : "s"} vinculado{lineDevices.length === 1 ? "" : "s"}
-                  {lineDevices.length > 0 && `, ${lineOnlineCount} online agora`}
+                  {lineStats && lineStats.bound > 0 && (
+                    <>
+                      {`, ${lineStats.online} online agora`}
+                      {lineStats.watching > 0 && (
+                        <span className="font-medium text-foreground">{`, ${lineStats.watching} assistindo`}</span>
+                      )}
+                    </>
+                  )}
                 </span>
                 <Button
                   type="button"
@@ -338,7 +360,7 @@ function DeviceTable({
       </thead>
       <tbody>
         {devices.map((d) => {
-          const online = Date.now() - d.lastSeenAt < ONLINE_MS;
+          const online = isDeviceOnline(d);
           const nowPlaying = online ? d.nowPlaying : null;
           const meta = ACCESS_META[d.access];
           const principalLabel = d.boundServerIds[0] ? serverLabel.get(d.boundServerIds[0]) ?? d.boundServerIds[0] : null;
@@ -608,7 +630,7 @@ function DeviceDetailPanel({
   useEffect(() => setDateDraft(toDateInput(device.expiresAt)), [device.expiresAt]);
 
   const showValidity = device.status !== "pending";
-  const online = Date.now() - device.lastSeenAt < ONLINE_MS;
+  const online = isDeviceOnline(device);
   const nowPlaying = online ? device.nowPlaying : null;
 
   return (

@@ -23255,20 +23255,14 @@ async function checkIptvUser(host, username, password) {
     if (!userInfo || typeof userInfo.exp_date === "undefined" || userInfo.exp_date === null) {
       return m3uFallback("Resposta inv\xE1lida da API");
     }
-    const activeConns = Number(userInfo.active_cons);
-    const maxConnections = Number(userInfo.max_connections);
-    const conns = {
-      activeConns: Number.isFinite(activeConns) ? activeConns : null,
-      maxConnections: Number.isFinite(maxConnections) ? maxConnections : null
-    };
     const expDate = Number(userInfo.exp_date);
     if (!Number.isFinite(expDate)) {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Data de expira\xE7\xE3o inv\xE1lida", ...conns };
+      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Data de expira\xE7\xE3o inv\xE1lida" };
     }
     if (userInfo.auth === 0 && userInfo.status !== "Active") {
-      return { status: "EXPIRADO", expDate, checkedAt: now, message: userInfo.status, ...conns };
+      return { status: "EXPIRADO", expDate, checkedAt: now, message: userInfo.status };
     }
-    return { status: computeStatus(expDate, now), expDate, checkedAt: now, ...conns };
+    return { status: computeStatus(expDate, now), expDate, checkedAt: now };
   } catch (err) {
     const message = err instanceof Error && err.message === "TIMEOUT" ? "Tempo de resposta excedido" : "N\xE3o foi poss\xEDvel conectar ao servidor";
     return { status: "OFFLINE", expDate: null, checkedAt: now, message };
