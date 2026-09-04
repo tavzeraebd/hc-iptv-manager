@@ -7,7 +7,7 @@ import { AdminLogin } from "@/components/admin-login";
 import { Header } from "@/components/header";
 import { Toolbar } from "@/components/toolbar";
 import type { StatusFilter, SortOrder } from "@/components/toolbar";
-import { UserCard } from "@/components/user-card";
+import { UserTable } from "@/components/user-table";
 import { UserFormDialog } from "@/components/user-form-dialog";
 import { ImportDialog } from "@/components/import-dialog";
 import { DeleteUserDialog } from "@/components/delete-user-dialog";
@@ -20,19 +20,21 @@ import { useIptvUsers } from "@/hooks/use-iptv-users";
 import { useTheme } from "@/hooks/use-theme";
 import type { IptvUserWithCheck } from "@/lib/types";
 
-function CardSkeleton() {
+function TableSkeleton() {
   return (
-    <div className="rounded-xl border border-l-4 border-l-muted p-5">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="h-5 w-20" />
-      </div>
-      <div className="mt-4 flex flex-col gap-3">
+    <div className="overflow-hidden rounded-xl border">
+      <div className="border-b bg-muted/50 px-3 py-2.5">
         <Skeleton className="h-4 w-40" />
-        <Skeleton className="h-4 w-40" />
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-4 w-28" />
       </div>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 border-b px-3 py-3 last:border-b-0">
+          <Skeleton className="h-5 w-20" />
+          <Skeleton className="h-4 w-44" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="ml-auto h-4 w-32" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -135,11 +137,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
           />
 
           {loading ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <CardSkeleton key={i} />
-              ))}
-            </div>
+            <TableSkeleton />
           ) : users.length === 0 ? (
             <EmptyState onAdd={openAddForm} />
           ) : visibleUsers.length === 0 ? (
@@ -147,21 +145,16 @@ function Dashboard({ onLock }: { onLock: () => void }) {
               Nenhum usuário encontrado para os filtros atuais.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {visibleUsers.map((user) => (
-                <UserCard
-                  key={user.id}
-                  user={user}
-                  onEdit={() => openEditForm(user)}
-                  onDelete={() => setDeletingUser(user)}
-                  onRefresh={() => checkOne(user)}
-                  onManageDevices={(id) => {
-                    setDevicesPreselect(id);
-                    setDevicesOpen(true);
-                  }}
-                />
-              ))}
-            </div>
+            <UserTable
+              users={visibleUsers}
+              onEdit={openEditForm}
+              onDelete={setDeletingUser}
+              onRefresh={checkOne}
+              onManageDevices={(id) => {
+                setDevicesPreselect(id);
+                setDevicesOpen(true);
+              }}
+            />
           )}
         </main>
 
