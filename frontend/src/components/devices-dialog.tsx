@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
   CalendarClock,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Clapperboard,
   Filter,
@@ -80,6 +82,13 @@ const ACCESS_META: Record<
   expired: { label: "EXPIRADO", variant: "destructive" },
 };
 
+const ACCESS_BORDER: Record<DeviceAccess, string> = {
+  active: "border-l-success",
+  pending: "border-l-warning",
+  disabled: "border-l-destructive",
+  expired: "border-l-destructive",
+};
+
 function relTime(ts: number): string {
   if (!ts) return "nunca";
   const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -152,118 +161,259 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
     [lineDevices]
   );
   const visibleDevices = onlyThisLine && preselectServerId ? lineDevices : devices;
+  const filteredToOneLine = onlyThisLine && Boolean(preselectServerId);
+
+  // Detalhes de um dispositivo (renomear, linhas, ativar/desativar, validade,
+  // excluir) — clique numa linha da tabela troca o conteúdo do diálogo pra
+  // esse painel (ver render abaixo). Fica sincronizado com o polling de 20s
+  // do useDevices enquanto aberto.
+  const [detailMac, setDetailMac] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) setDetailMac(null);
+  }, [open]);
+  const detailDevice = useMemo(
+    () => devices.find((d) => d.mac === detailMac) ?? null,
+    [devices, detailMac]
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <MonitorSmartphone className="size-5" /> Dispositivos
-          </DialogTitle>
-          <DialogDescription>
-            Cada aparelho do IPTV Player se anuncia aqui pelo MAC. Vincule um servidor e ative para
-            liberar o acesso — o app baixa a lista sozinho e perde o acesso quando a validade vence.
-          </DialogDescription>
-        </DialogHeader>
+        {detailDevice ? (
+          // Detalhes de 1 dispositivo (renomear, linhas, ativar/desativar,
+          // validade, excluir) — troca o conteúdo do MESMO diálogo em vez de
+          // abrir um 2º Dialog por cima: o Radix trata clique-fora do diálogo
+          // aninhado como "fechar o de baixo também", derrubando os dois.
+          <DeviceDetailPanel
+            device={detailDevice}
+            onBack={() => setDetailMac(null)}
+            servers={servers}
+            serverLabel={serverLabel}
+            onSetServers={(ids) =>
+              setServers(detailDevice.mac, ids)
+                .then(() => toast.success(ids.length ? "Linhas atualizadas." : "Linhas removidas."))
+                .catch((e) => toast.error(String(e)))
+            }
+            onRename={(name) =>
+              rename(detailDevice.mac, name).then(() => toast.success("Nome salvo.")).catch((e) => toast.error(String(e)))
+            }
+            onStatus={(s) => setStatus(detailDevice.mac, s).catch((e) => toast.error(String(e)))}
+            onActivate={() =>
+              patch(detailDevice.mac, { status: "active" })
+                .then(() => toast.success(`Liberado por ${DEFAULT_DAYS} dias.`))
+                .catch((e) => toast.error(String(e)))
+            }
+            onExtend={(days) =>
+              extend(detailDevice.mac, days)
+                .then((u) => toast.success(`Renovado — válido até ${fmtDate(u.expiresAt ?? Date.now())}.`))
+                .catch((e) => toast.error(String(e)))
+            }
+            onSetExpiry={(ts) =>
+              setExpiry(detailDevice.mac, ts)
+                .then(() => toast.success(ts == null ? "Marcado como vitalício." : `Validade: ${fmtDate(ts)}.`))
+                .catch((e) => toast.error(String(e)))
+            }
+            onRemove={() =>
+              remove(detailDevice.mac)
+                .then(() => {
+                  toast.success("Dispositivo removido.");
+                  setDetailMac(null);
+                })
+                .catch((e) => toast.error(String(e)))
+            }
+          />
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <MonitorSmartphone className="size-5" /> Dispositivos
+              </DialogTitle>
+              <DialogDescription>
+                Cada aparelho do IPTV Player se anuncia aqui pelo MAC. Vincule um servidor e ative para
+                liberar o acesso — o app baixa a lista sozinho e perde o acesso quando a validade vence.
+              </DialogDescription>
+            </DialogHeader>
 
-        <AddDeviceForm
-          servers={servers}
-          serverLabel={serverLabel}
-          preselectServerId={preselectServerId ?? null}
-          onSaved={() => reload(true)}
-        />
-
-        {lineServer && (
-          <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
-            <span className="text-muted-foreground">
-              Linha <span className="font-medium text-foreground">{serverLabel.get(lineServer.id)}</span>
-              {lineServer.check?.activeConns != null && (
-                <>
-                  {" · "}
-                  <span className="font-medium text-foreground">
-                    {lineServer.check.activeConns}
-                    {lineServer.check.maxConnections != null ? `/${lineServer.check.maxConnections}` : ""}
-                  </span>{" "}
-                  conexões ativas no painel (qualquer aparelho, não só os seus)
-                </>
-              )}
-              {" · "}
-              {lineDevices.length} dispositivo{lineDevices.length === 1 ? "" : "s"} seu
-              {lineDevices.length === 1 ? "" : "s"} vinculado{lineDevices.length === 1 ? "" : "s"}
-              {lineDevices.length > 0 && `, ${lineOnlineCount} online agora`}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 shrink-0 px-2 text-xs"
-              onClick={() => setOnlyThisLine((v) => !v)}
-            >
-              <Filter className="size-3.5" />
-              {onlyThisLine ? "Ver todos os dispositivos" : "Ver só desta linha"}
-            </Button>
-          </div>
-        )}
-
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">
-            {loading
-              ? "carregando…"
-              : `${visibleDevices.length} dispositivo${visibleDevices.length === 1 ? "" : "s"}`}
-          </span>
-          <Button variant="ghost" size="sm" onClick={() => reload()}>
-            <RotateCw className="size-4" /> Atualizar
-          </Button>
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <div className="flex max-h-[45vh] flex-col divide-y overflow-y-auto rounded-md border">
-          {visibleDevices.length === 0 && !loading && (
-            <p className="p-6 text-center text-sm text-muted-foreground">
-              {onlyThisLine && preselectServerId
-                ? "Nenhum dispositivo seu está vinculado a esta linha ainda."
-                : "Nenhum dispositivo ainda. Instale o IPTV Player e informe o endereço deste portal nele — o MAC aparece aqui automaticamente."}
-            </p>
-          )}
-          {visibleDevices.map((d) => (
-            <DeviceRow
-              key={d.mac}
-              device={d}
+            <AddDeviceForm
               servers={servers}
               serverLabel={serverLabel}
-              onSetServers={(ids) =>
-                setServers(d.mac, ids)
-                  .then(() => toast.success(ids.length ? "Linhas atualizadas." : "Linhas removidas."))
-                  .catch((e) => toast.error(String(e)))
-              }
-              onRename={(name) => rename(d.mac, name).then(() => toast.success("Nome salvo.")).catch((e) => toast.error(String(e)))}
-              onStatus={(s) => setStatus(d.mac, s).catch((e) => toast.error(String(e)))}
-              onActivate={() =>
-                patch(d.mac, { status: "active" })
-                  .then(() => toast.success(`Liberado por ${DEFAULT_DAYS} dias.`))
-                  .catch((e) => toast.error(String(e)))
-              }
-              onExtend={(days) =>
-                extend(d.mac, days)
-                  .then((u) => toast.success(`Renovado — válido até ${fmtDate(u.expiresAt ?? Date.now())}.`))
-                  .catch((e) => toast.error(String(e)))
-              }
-              onSetExpiry={(ts) =>
-                setExpiry(d.mac, ts)
-                  .then(() =>
-                    toast.success(ts == null ? "Marcado como vitalício." : `Validade: ${fmtDate(ts)}.`)
-                  )
-                  .catch((e) => toast.error(String(e)))
-              }
-              onRemove={() =>
-                remove(d.mac).then(() => toast.success("Dispositivo removido.")).catch((e) => toast.error(String(e)))
-              }
+              preselectServerId={preselectServerId ?? null}
+              onSaved={() => reload(true)}
             />
-          ))}
-        </div>
+
+            {lineServer && (
+              <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-muted-foreground">
+                  Linha <span className="font-medium text-foreground">{serverLabel.get(lineServer.id)}</span>
+                  {lineServer.check?.activeConns != null && (
+                    <>
+                      {" · "}
+                      <span className="font-medium text-foreground">
+                        {lineServer.check.activeConns}
+                        {lineServer.check.maxConnections != null ? `/${lineServer.check.maxConnections}` : ""}
+                      </span>{" "}
+                      conexões ativas no painel (qualquer aparelho, não só os seus)
+                    </>
+                  )}
+                  {" · "}
+                  {lineDevices.length} dispositivo{lineDevices.length === 1 ? "" : "s"} seu
+                  {lineDevices.length === 1 ? "" : "s"} vinculado{lineDevices.length === 1 ? "" : "s"}
+                  {lineDevices.length > 0 && `, ${lineOnlineCount} online agora`}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 px-2 text-xs"
+                  onClick={() => setOnlyThisLine((v) => !v)}
+                >
+                  <Filter className="size-3.5" />
+                  {onlyThisLine ? "Ver todos os dispositivos" : "Ver só desta linha"}
+                </Button>
+              </div>
+            )}
+
+            <div className="mt-2 flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                {loading
+                  ? "carregando…"
+                  : `${visibleDevices.length} dispositivo${visibleDevices.length === 1 ? "" : "s"}`}
+              </span>
+              <Button variant="ghost" size="sm" onClick={() => reload()}>
+                <RotateCw className="size-4" /> Atualizar
+              </Button>
+            </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
+            {visibleDevices.length === 0 && !loading ? (
+              <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
+                {onlyThisLine && preselectServerId
+                  ? "Nenhum dispositivo seu está vinculado a esta linha ainda."
+                  : "Nenhum dispositivo ainda. Instale o IPTV Player e informe o endereço deste portal nele — o MAC aparece aqui automaticamente."}
+              </div>
+            ) : (
+              <div className="max-h-[45vh] overflow-y-auto rounded-md border">
+                <DeviceTable
+                  devices={visibleDevices}
+                  hideLineColumn={filteredToOneLine}
+                  serverLabel={serverLabel}
+                  onOpenDetail={setDetailMac}
+                />
+              </div>
+            )}
+          </>
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Tabela compacta: só o essencial pra ver de relance quem está conectado em
+// cada linha e o que está assistindo. Clique numa linha abre os detalhes
+// completos (renomear, linhas, validade, ativar/desativar, excluir).
+function DeviceTable({
+  devices,
+  hideLineColumn,
+  serverLabel,
+  onOpenDetail,
+}: {
+  devices: PortalDevice[];
+  /** Some quando já filtrado numa única linha (ela já aparece na barra de
+   * resumo acima) — repetir em toda linha da tabela seria redundante. */
+  hideLineColumn: boolean;
+  serverLabel: Map<string, string>;
+  onOpenDetail: (mac: string) => void;
+}) {
+  return (
+    <table className="w-full border-collapse text-sm">
+      <thead>
+        <tr className="border-b bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+          <th className="px-3 py-2 font-medium">Status</th>
+          <th className="px-3 py-2 font-medium">Dispositivo</th>
+          {!hideLineColumn && <th className="px-3 py-2 font-medium">Linha</th>}
+          <th className="px-3 py-2 font-medium">Assistindo agora</th>
+          <th className="px-2 py-2" />
+        </tr>
+      </thead>
+      <tbody>
+        {devices.map((d) => {
+          const online = Date.now() - d.lastSeenAt < ONLINE_MS;
+          const nowPlaying = online ? d.nowPlaying : null;
+          const meta = ACCESS_META[d.access];
+          const principalLabel = d.boundServerIds[0] ? serverLabel.get(d.boundServerIds[0]) ?? d.boundServerIds[0] : null;
+
+          return (
+            <tr
+              key={d.mac}
+              className={cn(
+                "cursor-pointer border-b border-l-4 transition-colors last:border-b-0 hover:bg-muted/40",
+                ACCESS_BORDER[d.access]
+              )}
+              onClick={() => onOpenDetail(d.mac)}
+            >
+              <td className="whitespace-nowrap px-3 py-2">
+                <span className="flex items-center gap-1.5">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={cn(
+                          "inline-block size-2 shrink-0 rounded-full",
+                          online ? "bg-success" : "bg-muted-foreground/30"
+                        )}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {online ? "Online agora" : `Visto ${relTime(d.lastSeenAt)}`}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Badge variant={meta.variant}>{meta.label}</Badge>
+                </span>
+              </td>
+
+              <td className="max-w-[200px] px-3 py-2">
+                <div className="truncate font-medium">{d.name || "(sem nome)"}</div>
+                <div className="truncate font-mono text-[11px] text-muted-foreground">{d.mac}</div>
+              </td>
+
+              {!hideLineColumn && (
+                <td className="max-w-[220px] px-3 py-2 text-xs text-muted-foreground">
+                  {principalLabel ? (
+                    <span className="truncate" title={principalLabel}>
+                      {principalLabel}
+                      {d.boundServerIds.length > 1 && ` +${d.boundServerIds.length - 1}`}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              )}
+
+              <td className="max-w-[240px] px-3 py-2">
+                {nowPlaying ? (
+                  <span className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
+                    {nowPlaying.kind === "live" ? (
+                      <Tv className="size-3.5 shrink-0" />
+                    ) : (
+                      <Clapperboard className="size-3.5 shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {NOW_PLAYING_LABEL[nowPlaying.kind]}: <span className="font-medium">{nowPlaying.title}</span>
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
+              </td>
+
+              <td className="px-2 py-2">
+                <ChevronRight className="ml-auto size-4 text-muted-foreground" />
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
@@ -425,8 +575,9 @@ function AddDeviceForm({
   );
 }
 
-function DeviceRow({
+function DeviceDetailPanel({
   device,
+  onBack,
   servers,
   serverLabel,
   onSetServers,
@@ -438,6 +589,7 @@ function DeviceRow({
   onRemove,
 }: {
   device: PortalDevice;
+  onBack: () => void;
   servers: IptvUserWithCheck[];
   serverLabel: Map<string, string>;
   onSetServers: (ids: string[]) => void;
@@ -460,39 +612,50 @@ function DeviceRow({
   const nowPlaying = online ? device.nowPlaying : null;
 
   return (
-    <div className="flex flex-col gap-2 p-3 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 font-mono text-xs">
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="-ml-2 size-8"
+            onClick={onBack}
+            title="Voltar"
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
           <Tooltip>
             <TooltipTrigger asChild>
               <span
                 className={cn(
-                  "inline-block size-2 shrink-0 rounded-full",
+                  "inline-block size-2.5 shrink-0 rounded-full",
                   online ? "bg-success" : "bg-muted-foreground/30"
                 )}
               />
             </TooltipTrigger>
             <TooltipContent>{online ? "Online agora" : `Visto ${relTime(device.lastSeenAt)}`}</TooltipContent>
           </Tooltip>
-          {device.mac}
-        </span>
-        <Badge variant={meta.variant}>{meta.label}</Badge>
-      </div>
+          <span className="font-mono text-sm">{device.mac}</span>
+          <Badge variant={meta.variant}>{meta.label}</Badge>
+        </DialogTitle>
+      </DialogHeader>
 
-      {nowPlaying && (
-        <div className="flex items-center gap-1.5 rounded-md bg-orange-500/10 px-2 py-1 text-xs text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-400">
-          {nowPlaying.kind === "live" ? (
-            <Tv className="size-3.5 shrink-0" />
-          ) : (
-            <Clapperboard className="size-3.5 shrink-0" />
+      <div className="flex flex-col gap-2 text-sm">
+        {nowPlaying && (
+            <div className="flex items-center gap-1.5 rounded-md bg-orange-500/10 px-2 py-1 text-xs text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-400">
+              {nowPlaying.kind === "live" ? (
+                <Tv className="size-3.5 shrink-0" />
+              ) : (
+                <Clapperboard className="size-3.5 shrink-0" />
+              )}
+              <span className="truncate">
+                Assistindo agora · {NOW_PLAYING_LABEL[nowPlaying.kind]}: <span className="font-medium">{nowPlaying.title}</span>
+              </span>
+            </div>
           )}
-          <span className="truncate">
-            Assistindo agora · {NOW_PLAYING_LABEL[nowPlaying.kind]}: <span className="font-medium">{nowPlaying.title}</span>
-          </span>
-        </div>
-      )}
 
-      <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
         {editing ? (
           <>
             <Input
@@ -606,7 +769,8 @@ function DeviceRow({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 
