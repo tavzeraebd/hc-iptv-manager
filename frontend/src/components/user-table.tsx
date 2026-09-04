@@ -3,6 +3,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Info,
   MonitorSmartphone,
   MoreVertical,
   Pencil,
@@ -241,7 +242,22 @@ export function UserTable({ users, onEdit, onDelete, onRefresh, onManageDevices 
         <thead>
           <tr className="border-b bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
             <th className="px-3 py-2 font-medium">Status</th>
-            <th className="px-3 py-2 font-medium">Conexões</th>
+            <th className="px-3 py-2 font-medium">
+              <span className="flex items-center gap-1">
+                Conexões
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="size-3 shrink-0 text-muted-foreground/70" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-64">
+                    Número informado pelo painel do provedor — de qualquer aparelho usando a
+                    credencial, não só os seus. Alguns painéis atrasam ou falham em contar direito;
+                    pra saber com certeza quem está vendo o quê, use "Assistindo agora" na tela de
+                    Dispositivos (esse dado vem do seu Player, não do painel).
+                  </TooltipContent>
+                </Tooltip>
+              </span>
+            </th>
             <th className="px-3 py-2 font-medium">Servidor</th>
             <th className="px-3 py-2 font-medium">Usuário</th>
             <th className="px-3 py-2 font-medium">
