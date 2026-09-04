@@ -56,8 +56,13 @@ interface DevicesDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   servers: IptvUserWithCheck[];
-  /** Servidor pré-selecionado ao abrir por "Vincular dispositivo" de um card. */
+  /** Servidor pré-selecionado ao abrir por "Vincular dispositivo" ou pelo
+   * badge de Conexões de uma linha. */
   preselectServerId?: string | null;
+  /** "manage" (padrão): tela completa, com formulário de cadastro/vínculo.
+   * "connections": aberto pelo badge de Conexões — só a lista de quem está
+   * conectado nessa linha, sem formulário nenhum. */
+  mode?: "manage" | "connections";
   // Estado de dispositivos levantado pro App.tsx (a tabela de servidores
   // também usa, pra mostrar conexões por linha) — ver hooks/use-devices.
   devices: PortalDevice[];
@@ -149,6 +154,7 @@ export function DevicesDialog({
   onOpenChange,
   servers,
   preselectServerId,
+  mode = "manage",
   devices,
   loading,
   error,
@@ -161,6 +167,7 @@ export function DevicesDialog({
   remove,
   patch,
 }: DevicesDialogProps) {
+  const isConnectionsView = mode === "connections";
   const serverLabel = useMemo(() => {
     const m = new Map<string, string>();
     servers.forEach((s) => m.set(s.id, `${s.host} — ${s.username}`));
@@ -168,9 +175,12 @@ export function DevicesDialog({
   }, [servers]);
 
   // Abrindo pelo botão de conexões de uma linha específica (App.tsx), começa
-  // filtrado nela; o toggle abaixo deixa ver todos os dispositivos.
-  const [onlyThisLine, setOnlyThisLine] = useState(Boolean(preselectServerId));
-  useEffect(() => setOnlyThisLine(Boolean(preselectServerId)), [preselectServerId, open]);
+  // filtrado nela; o toggle abaixo deixa ver todos os dispositivos. No modo
+  // "connections" o filtro fica travado nessa linha — a intenção do botão é
+  // só ver quem está conectado ali, não navegar pro cadastro geral.
+  const [onlyThisLineToggle, setOnlyThisLineToggle] = useState(Boolean(preselectServerId));
+  useEffect(() => setOnlyThisLineToggle(Boolean(preselectServerId)), [preselectServerId, open]);
+  const onlyThisLine = isConnectionsView || onlyThisLineToggle;
 
   const lineServer = useMemo(
     () => (preselectServerId ? servers.find((s) => s.id === preselectServerId) ?? null : null),
@@ -251,20 +261,24 @@ export function DevicesDialog({
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <MonitorSmartphone className="size-5" /> Dispositivos
+                <MonitorSmartphone className="size-5" />
+                {isConnectionsView ? "Conectados nesta linha" : "Dispositivos"}
               </DialogTitle>
               <DialogDescription>
-                Cada aparelho do IPTV Player se anuncia aqui pelo MAC. Vincule um servidor e ative para
-                liberar o acesso — o app baixa a lista sozinho e perde o acesso quando a validade vence.
+                {isConnectionsView
+                  ? "Dispositivos seus vinculados a esta linha e o que estão assistindo agora."
+                  : "Cada aparelho do IPTV Player se anuncia aqui pelo MAC. Vincule um servidor e ative para liberar o acesso — o app baixa a lista sozinho e perde o acesso quando a validade vence."}
               </DialogDescription>
             </DialogHeader>
 
-            <AddDeviceForm
-              servers={servers}
-              serverLabel={serverLabel}
-              preselectServerId={preselectServerId ?? null}
-              onSaved={() => reload(true)}
-            />
+            {!isConnectionsView && (
+              <AddDeviceForm
+                servers={servers}
+                serverLabel={serverLabel}
+                preselectServerId={preselectServerId ?? null}
+                onSaved={() => reload(true)}
+              />
+            )}
 
             {lineServer && (
               <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
@@ -282,16 +296,18 @@ export function DevicesDialog({
                     </>
                   )}
                 </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 shrink-0 px-2 text-xs"
-                  onClick={() => setOnlyThisLine((v) => !v)}
-                >
-                  <Filter className="size-3.5" />
-                  {onlyThisLine ? "Ver todos os dispositivos" : "Ver só desta linha"}
-                </Button>
+                {!isConnectionsView && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 px-2 text-xs"
+                    onClick={() => setOnlyThisLineToggle((v) => !v)}
+                  >
+                    <Filter className="size-3.5" />
+                    {onlyThisLine ? "Ver todos os dispositivos" : "Ver só desta linha"}
+                  </Button>
+                )}
               </div>
             )}
 

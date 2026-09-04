@@ -67,6 +67,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
   const [importOpen, setImportOpen] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
+  const [devicesMode, setDevicesMode] = useState<"manage" | "connections">("manage");
   const [renewalOpen, setRenewalOpen] = useState(false);
   const [devicesPreselect, setDevicesPreselect] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<IptvUserWithCheck | null>(null);
@@ -126,6 +127,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
           onOpenServerSettings={() => setServerSettingsOpen(true)}
           onOpenDevices={() => {
             setDevicesPreselect(null);
+            setDevicesMode("manage");
             setDevicesOpen(true);
           }}
           onOpenRenewal={() => setRenewalOpen(true)}
@@ -159,6 +161,12 @@ function Dashboard({ onLock }: { onLock: () => void }) {
               onRefresh={checkOne}
               onManageDevices={(id) => {
                 setDevicesPreselect(id);
+                setDevicesMode("manage");
+                setDevicesOpen(true);
+              }}
+              onViewConnections={(id) => {
+                setDevicesPreselect(id);
+                setDevicesMode("connections");
                 setDevicesOpen(true);
               }}
             />
@@ -220,6 +228,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
           onOpenChange={setDevicesOpen}
           servers={users}
           preselectServerId={devicesPreselect}
+          mode={devicesMode}
           {...devicesState}
         />
 

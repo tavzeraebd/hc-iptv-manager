@@ -38,8 +38,13 @@ interface UserTableProps {
   onEdit: (user: IptvUserWithCheck) => void;
   onDelete: (user: IptvUserWithCheck) => void;
   onRefresh: (user: IptvUserWithCheck) => void;
-  /** Abre "Dispositivos" já com este servidor pré-selecionado pra vincular. */
+  /** Abre "Dispositivos" já com este servidor pré-selecionado pra vincular
+   * (menu ⋮ "Vincular dispositivo") — tela completa, com formulário de
+   * cadastro. */
   onManageDevices: (serverId: string) => void;
+  /** Abre a mesma tela filtrada nesta linha, mas só a lista de quem está
+   * conectado — clique no badge de Conexões. Sem formulário de cadastro. */
+  onViewConnections: (serverId: string) => void;
 }
 
 function CopyBtn({ label, value }: { label: string; value: string }) {
@@ -68,6 +73,7 @@ function UserRow({
   onDelete,
   onRefresh,
   onManageDevices,
+  onViewConnections,
 }: {
   user: IptvUserWithCheck;
   devices: PortalDevice[];
@@ -76,6 +82,7 @@ function UserRow({
   onDelete: () => void;
   onRefresh: () => void;
   onManageDevices: (serverId: string) => void;
+  onViewConnections: (serverId: string) => void;
 }) {
   const [show, setShow] = useState(false);
   const reveal = show || revealAll;
@@ -118,7 +125,7 @@ function UserRow({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => onManageDevices(user.id)}
+                  onClick={() => onViewConnections(user.id)}
                   className={cn(
                     "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset transition-colors hover:opacity-80",
                     stats.watching > 0
@@ -242,7 +249,15 @@ function UserRow({
   );
 }
 
-export function UserTable({ users, devices, onEdit, onDelete, onRefresh, onManageDevices }: UserTableProps) {
+export function UserTable({
+  users,
+  devices,
+  onEdit,
+  onDelete,
+  onRefresh,
+  onManageDevices,
+  onViewConnections,
+}: UserTableProps) {
   const [revealAll, setRevealAll] = useState(false);
 
   return (
@@ -297,6 +312,7 @@ export function UserTable({ users, devices, onEdit, onDelete, onRefresh, onManag
               onDelete={() => onDelete(user)}
               onRefresh={() => onRefresh(user)}
               onManageDevices={onManageDevices}
+              onViewConnections={onViewConnections}
             />
           ))}
         </tbody>
