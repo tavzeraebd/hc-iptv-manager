@@ -23255,14 +23255,20 @@ async function checkIptvUser(host, username, password) {
     if (!userInfo || typeof userInfo.exp_date === "undefined" || userInfo.exp_date === null) {
       return m3uFallback("Resposta inv\xE1lida da API");
     }
+    const activeConns = Number(userInfo.active_cons);
+    const maxConnections = Number(userInfo.max_connections);
+    const conns = {
+      activeConns: Number.isFinite(activeConns) ? activeConns : null,
+      maxConnections: Number.isFinite(maxConnections) ? maxConnections : null
+    };
     const expDate = Number(userInfo.exp_date);
     if (!Number.isFinite(expDate)) {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Data de expira\xE7\xE3o inv\xE1lida" };
+      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Data de expira\xE7\xE3o inv\xE1lida", ...conns };
     }
     if (userInfo.auth === 0 && userInfo.status !== "Active") {
-      return { status: "EXPIRADO", expDate, checkedAt: now, message: userInfo.status };
+      return { status: "EXPIRADO", expDate, checkedAt: now, message: userInfo.status, ...conns };
     }
-    return { status: computeStatus(expDate, now), expDate, checkedAt: now };
+    return { status: computeStatus(expDate, now), expDate, checkedAt: now, ...conns };
   } catch (err) {
     const message = err instanceof Error && err.message === "TIMEOUT" ? "Tempo de resposta excedido" : "N\xE3o foi poss\xEDvel conectar ao servidor";
     return { status: "OFFLINE", expDate: null, checkedAt: now, message };
@@ -23641,6 +23647,14 @@ var init_paymentStore = __esm({
 });
 
 // src/deviceStore.ts
+function coerceNowPlaying(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw;
+  if (typeof o.kind !== "string" || !NOW_PLAYING_KINDS.has(o.kind)) return null;
+  if (typeof o.title !== "string" || !o.title.trim()) return null;
+  const startedAt = typeof o.startedAt === "number" && Number.isFinite(o.startedAt) ? o.startedAt : Date.now();
+  return { kind: o.kind, title: o.title.trim().slice(0, 200), startedAt };
+}
 function normalizeMac(raw) {
   if (typeof raw !== "string") return null;
   const hex = raw.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
@@ -23716,7 +23730,8 @@ function parseLine2(line) {
       status: coerceStatus(p.status),
       boundServerIds: coerceServerIds(p.boundServerIds, p.boundServerId),
       expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null,
-      trialStartedAt: typeof p.trialStartedAt === "number" ? p.trialStartedAt : null
+      trialStartedAt: typeof p.trialStartedAt === "number" ? p.trialStartedAt : null,
+      nowPlaying: coerceNowPlaying(p.nowPlaying)
     };
   } catch {
     return null;
@@ -23757,7 +23772,8 @@ async function fileUpsertFromHeartbeat(input, trialGrant) {
       status: trialGrant ? "active" : "pending",
       boundServerIds: trialGrant ? [trialGrant.serverId] : [],
       expiresAt: trialGrant ? trialGrant.expiresAt : null,
-      trialStartedAt: trialGrant ? now : null
+      trialStartedAt: trialGrant ? now : null,
+      nowPlaying: input.nowPlaying ?? null
     };
     devices.push(created);
     await fileWriteDevices(devices);
@@ -23769,7 +23785,10 @@ async function fileUpsertFromHeartbeat(input, trialGrant) {
     name: input.name != null && input.name.trim() ? input.name.trim() : existing.name,
     model: input.model != null && input.model.trim() ? input.model.trim() : existing.model,
     platform: input.platform != null && input.platform.trim() ? input.platform.trim() : existing.platform,
-    lastSeenAt: now
+    lastSeenAt: now,
+    // Estado ao vivo — sempre reflete o último heartbeat, nunca "mantém o
+    // anterior se não vier" (senão "assistindo X" nunca some quando pausa).
+    nowPlaying: input.nowPlaying ?? null
   };
   devices[idx] = updated;
   await fileWriteDevices(devices);
@@ -23792,7 +23811,8 @@ async function fileUpdateDevice(mac, patch) {
       status: "pending",
       boundServerIds: [],
       expiresAt: null,
-      trialStartedAt: null
+      trialStartedAt: null,
+      nowPlaying: null
     });
     idx = devices.length - 1;
   }
@@ -23830,7 +23850,8 @@ function rowToDevice(r) {
     status: coerceStatus(r.status),
     boundServerIds: coerceServerIds(r.bound_server_ids, r.bound_server_id),
     expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
-    trialStartedAt: r.trial_started_at != null ? Number(r.trial_started_at) : null
+    trialStartedAt: r.trial_started_at != null ? Number(r.trial_started_at) : null,
+    nowPlaying: coerceNowPlaying(r.now_playing)
   };
 }
 async function sbReadDevices() {
@@ -23852,7 +23873,7 @@ async function sbUpsertFromHeartbeat(input, trialGrant) {
   if (!mac) throw new Error("MAC inv\xE1lido.");
   const sb = await getSupabase();
   const now = Date.now();
-  const meta = { last_seen_at: now };
+  const meta = { last_seen_at: now, now_playing: input.nowPlaying ?? null };
   if (input.name != null && input.name.trim()) meta.name = input.name.trim();
   if (input.model != null && input.model.trim()) meta.model = input.model.trim();
   if (input.platform != null && input.platform.trim()) meta.platform = input.platform.trim();
@@ -23866,7 +23887,8 @@ async function sbUpsertFromHeartbeat(input, trialGrant) {
     platform: (input.platform ?? "").trim(),
     first_seen_at: now,
     last_seen_at: now,
-    status: trialGrant ? "active" : "pending"
+    status: trialGrant ? "active" : "pending",
+    now_playing: input.nowPlaying ?? null
   };
   if (trialGrant) {
     insertRow.bound_server_id = trialGrant.serverId;
@@ -23907,7 +23929,8 @@ async function sbUpdateDevice(mac, patch) {
       bound_server_id: null,
       bound_server_ids: [],
       expires_at: null,
-      trial_started_at: null
+      trial_started_at: null,
+      now_playing: null
     });
   }
   const upd = {};
@@ -23950,7 +23973,7 @@ function updateDevice(mac, patch) {
 function deleteDevice(mac) {
   return supabaseEnabled() ? sbDeleteDevice(mac) : fileDeleteDevice(mac);
 }
-var import_fs2, import_path2, DATA_DIR2, DATA_FILE2, TABLE2, DAY_MS, DEFAULT_VALIDITY_DAYS;
+var import_fs2, import_path2, DATA_DIR2, DATA_FILE2, TABLE2, DAY_MS, DEFAULT_VALIDITY_DAYS, NOW_PLAYING_KINDS;
 var init_deviceStore = __esm({
   "src/deviceStore.ts"() {
     "use strict";
@@ -23962,6 +23985,7 @@ var init_deviceStore = __esm({
     TABLE2 = "devices";
     DAY_MS = 864e5;
     DEFAULT_VALIDITY_DAYS = 30;
+    NOW_PLAYING_KINDS = /* @__PURE__ */ new Set(["live", "vod", "series"]);
   }
 });
 
@@ -23980,7 +24004,8 @@ async function withServer(device) {
     firstSeenAt: device.firstSeenAt,
     lastSeenAt: device.lastSeenAt,
     expiresAt: device.expiresAt,
-    trialStartedAt: device.trialStartedAt
+    trialStartedAt: device.trialStartedAt,
+    nowPlaying: device.nowPlaying
   };
   if (device.status !== "active" || ids.length === 0 || isExpired(device)) {
     return { ...base, server: null, servers: [] };
@@ -24037,7 +24062,8 @@ var init_devices = __esm({
             mac,
             name: typeof body.name === "string" ? body.name : void 0,
             model: typeof body.model === "string" ? body.model : void 0,
-            platform: typeof body.platform === "string" ? body.platform : void 0
+            platform: typeof body.platform === "string" ? body.platform : void 0,
+            nowPlaying: coerceNowPlaying(body.nowPlaying)
           },
           trialGrant
         );

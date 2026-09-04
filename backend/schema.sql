@@ -45,6 +45,9 @@ update public.devices
    and (bound_server_ids is null or bound_server_ids = '[]'::jsonb);
 -- teste grátis automático (concedido 1x no 1º heartbeat de um device novo):
 alter table public.devices add column if not exists trial_started_at bigint;
+-- o que o Player está reproduzindo agora ({kind, title, startedAt} | null),
+-- reportado a cada heartbeat enquanto assiste:
+alter table public.devices add column if not exists now_playing jsonb;
 
 create index if not exists devices_last_seen_idx on public.devices (last_seen_at desc);
 

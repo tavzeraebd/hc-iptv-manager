@@ -40,6 +40,31 @@ export interface Device {
   /** Quando o teste grátis automático foi concedido a este device (epoch ms).
    * null = nunca teve teste. Garante que o teste só é dado 1x por device. */
   trialStartedAt: number | null;
+  /** O que o Player está reproduzindo agora, reportado a cada heartbeat
+   * enquanto assiste. null = parado/navegando. Só existe pra devices que
+   * entraram via pareamento (o portal não sabe de nada rodando fora dele). */
+  nowPlaying: NowPlaying | null;
+}
+
+export interface NowPlaying {
+  kind: "live" | "vod" | "series";
+  title: string;
+  /** Quando começou a tocar este item (epoch ms). */
+  startedAt: number;
+}
+
+const NOW_PLAYING_KINDS = new Set(["live", "vod", "series"]);
+
+// Sanitiza o `nowPlaying` vindo do heartbeat (ou lido do storage) — nunca
+// confia no formato de entrada externa.
+export function coerceNowPlaying(raw: unknown): NowPlaying | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.kind !== "string" || !NOW_PLAYING_KINDS.has(o.kind)) return null;
+  if (typeof o.title !== "string" || !o.title.trim()) return null;
+  const startedAt =
+    typeof o.startedAt === "number" && Number.isFinite(o.startedAt) ? o.startedAt : Date.now();
+  return { kind: o.kind as NowPlaying["kind"], title: o.title.trim().slice(0, 200), startedAt };
 }
 
 export interface HeartbeatInput {
@@ -47,6 +72,8 @@ export interface HeartbeatInput {
   name?: string;
   model?: string;
   platform?: string;
+  /** `undefined` = não informado (Player antigo); `null`/objeto = estado atual. */
+  nowPlaying?: NowPlaying | null;
 }
 
 /** Concessão de teste grátis a aplicar SÓ quando o device é criado agora (1º
@@ -185,6 +212,7 @@ function parseLine(line: string): Device | null {
       boundServerIds: coerceServerIds(p.boundServerIds, p.boundServerId),
       expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null,
       trialStartedAt: typeof p.trialStartedAt === "number" ? p.trialStartedAt : null,
+      nowPlaying: coerceNowPlaying(p.nowPlaying),
     };
   } catch {
     return null;
@@ -235,6 +263,7 @@ async function fileUpsertFromHeartbeat(
       boundServerIds: trialGrant ? [trialGrant.serverId] : [],
       expiresAt: trialGrant ? trialGrant.expiresAt : null,
       trialStartedAt: trialGrant ? now : null,
+      nowPlaying: input.nowPlaying ?? null,
     };
     devices.push(created);
     await fileWriteDevices(devices);
@@ -249,6 +278,9 @@ async function fileUpsertFromHeartbeat(
     platform:
       input.platform != null && input.platform.trim() ? input.platform.trim() : existing.platform,
     lastSeenAt: now,
+    // Estado ao vivo — sempre reflete o último heartbeat, nunca "mantém o
+    // anterior se não vier" (senão "assistindo X" nunca some quando pausa).
+    nowPlaying: input.nowPlaying ?? null,
   };
   devices[idx] = updated;
   await fileWriteDevices(devices);
@@ -274,6 +306,7 @@ async function fileUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<D
       boundServerIds: [],
       expiresAt: null,
       trialStartedAt: null,
+      nowPlaying: null,
     });
     idx = devices.length - 1;
   }
@@ -319,6 +352,7 @@ interface DeviceRow {
   bound_server_ids: unknown;
   expires_at: number | string | null;
   trial_started_at: number | string | null;
+  now_playing: unknown;
 }
 
 function rowToDevice(r: DeviceRow): Device {
@@ -333,6 +367,7 @@ function rowToDevice(r: DeviceRow): Device {
     boundServerIds: coerceServerIds(r.bound_server_ids, r.bound_server_id),
     expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
     trialStartedAt: r.trial_started_at != null ? Number(r.trial_started_at) : null,
+    nowPlaying: coerceNowPlaying(r.now_playing),
   };
 }
 
@@ -365,7 +400,9 @@ async function sbUpsertFromHeartbeat(
   const now = Date.now();
 
   // Metadados que o heartbeat pode mexer — NUNCA status/boundServerId.
-  const meta: Record<string, unknown> = { last_seen_at: now };
+  // now_playing sempre reflete o último valor enviado (inclusive null),
+  // senão "assistindo X" nunca some quando o Player pausa/sai.
+  const meta: Record<string, unknown> = { last_seen_at: now, now_playing: input.nowPlaying ?? null };
   if (input.name != null && input.name.trim()) meta.name = input.name.trim();
   if (input.model != null && input.model.trim()) meta.model = input.model.trim();
   if (input.platform != null && input.platform.trim()) meta.platform = input.platform.trim();
@@ -386,6 +423,7 @@ async function sbUpsertFromHeartbeat(
     first_seen_at: now,
     last_seen_at: now,
     status: trialGrant ? "active" : "pending",
+    now_playing: input.nowPlaying ?? null,
   };
   if (trialGrant) {
     insertRow.bound_server_id = trialGrant.serverId;
@@ -435,6 +473,7 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
         bound_server_ids: [],
         expires_at: null,
         trial_started_at: null,
+        now_playing: null,
       });
   }
 

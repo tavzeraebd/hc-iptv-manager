@@ -10,6 +10,7 @@ import {
   normalizeMac,
   accessOf,
   isExpired,
+  coerceNowPlaying,
   type Device,
   type TrialGrant,
 } from "../deviceStore";
@@ -43,6 +44,7 @@ async function withServer(device: Device) {
     lastSeenAt: device.lastSeenAt,
     expiresAt: device.expiresAt,
     trialStartedAt: device.trialStartedAt,
+    nowPlaying: device.nowPlaying,
   };
   if (device.status !== "active" || ids.length === 0 || isExpired(device)) {
     return { ...base, server: null as ServerCreds | null, servers: [] as ServerCreds[] };
@@ -90,6 +92,7 @@ router.post("/devices/heartbeat", async (req: Request, res: Response) => {
         name: typeof body.name === "string" ? body.name : undefined,
         model: typeof body.model === "string" ? body.model : undefined,
         platform: typeof body.platform === "string" ? body.platform : undefined,
+        nowPlaying: coerceNowPlaying(body.nowPlaying),
       },
       trialGrant
     );

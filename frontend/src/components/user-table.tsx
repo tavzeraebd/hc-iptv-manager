@@ -96,6 +96,39 @@ function UserRow({
         )}
       </td>
 
+      {/* Conexões ativas AGORA nessa linha, segundo o próprio painel — conta
+          qualquer aparelho usando a credencial, não só os dispositivos
+          cadastrados aqui. Clique abre "Dispositivos" filtrado nesta linha. */}
+      <td className="whitespace-nowrap px-3 py-2">
+        {showSkeleton ? (
+          <Skeleton className="h-5 w-14" />
+        ) : check?.activeConns != null ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onManageDevices(user.id)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset transition-colors hover:opacity-80",
+                  check.maxConnections != null && check.activeConns >= check.maxConnections
+                    ? "bg-destructive/10 text-destructive ring-destructive/20"
+                    : check.activeConns > 0
+                      ? "bg-orange-500/10 text-orange-600 ring-orange-500/20 dark:text-orange-400"
+                      : "bg-muted text-muted-foreground ring-border"
+                )}
+              >
+                <MonitorSmartphone className="size-3" />
+                {check.activeConns}
+                {check.maxConnections != null ? `/${check.maxConnections}` : ""}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Ver dispositivos vinculados a esta linha</TooltipContent>
+          </Tooltip>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </td>
+
       {/* Servidor */}
       <td className="max-w-[220px] px-3 py-2">
         <span className="flex items-center gap-1">
@@ -208,6 +241,7 @@ export function UserTable({ users, onEdit, onDelete, onRefresh, onManageDevices 
         <thead>
           <tr className="border-b bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
             <th className="px-3 py-2 font-medium">Status</th>
+            <th className="px-3 py-2 font-medium">Conexões</th>
             <th className="px-3 py-2 font-medium">Servidor</th>
             <th className="px-3 py-2 font-medium">Usuário</th>
             <th className="px-3 py-2 font-medium">

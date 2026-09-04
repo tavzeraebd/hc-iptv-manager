@@ -135,7 +135,15 @@ export async function checkIptvUser(
       return m3uFallback("Sem resposta do player_api");
     }
 
-    let data: { user_info?: { exp_date?: string | number | null; auth?: number; status?: string } };
+    let data: {
+      user_info?: {
+        exp_date?: string | number | null;
+        auth?: number;
+        status?: string;
+        active_cons?: string | number | null;
+        max_connections?: string | number | null;
+      };
+    };
     try {
       data = JSON.parse(response.body);
     } catch {
@@ -147,16 +155,25 @@ export async function checkIptvUser(
       return m3uFallback("Resposta inválida da API");
     }
 
+    // Quantas conexões o próprio painel diz estarem ativas AGORA nessa linha
+    // (qualquer aparelho usando essas credenciais, não só os nossos Players).
+    const activeConns = Number(userInfo.active_cons);
+    const maxConnections = Number(userInfo.max_connections);
+    const conns = {
+      activeConns: Number.isFinite(activeConns) ? activeConns : null,
+      maxConnections: Number.isFinite(maxConnections) ? maxConnections : null,
+    };
+
     const expDate = Number(userInfo.exp_date);
     if (!Number.isFinite(expDate)) {
-      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Data de expiração inválida" };
+      return { status: "OFFLINE", expDate: null, checkedAt: now, message: "Data de expiração inválida", ...conns };
     }
 
     if (userInfo.auth === 0 && userInfo.status !== "Active") {
-      return { status: "EXPIRADO", expDate, checkedAt: now, message: userInfo.status };
+      return { status: "EXPIRADO", expDate, checkedAt: now, message: userInfo.status, ...conns };
     }
 
-    return { status: computeStatus(expDate, now), expDate, checkedAt: now };
+    return { status: computeStatus(expDate, now), expDate, checkedAt: now, ...conns };
   } catch (err) {
     const message =
       err instanceof Error && err.message === "TIMEOUT"

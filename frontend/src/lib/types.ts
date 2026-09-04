@@ -5,6 +5,11 @@ export interface CheckResult {
   expDate: number | null;
   checkedAt: number;
   message?: string;
+  /** Conexões simultâneas ativas AGORA nessa linha, segundo o próprio painel
+   * (conta qualquer aparelho usando essas credenciais, não só os dispositivos
+   * cadastrados aqui). null = painel não informou. */
+  activeConns?: number | null;
+  maxConnections?: number | null;
 }
 
 export interface IptvUser {

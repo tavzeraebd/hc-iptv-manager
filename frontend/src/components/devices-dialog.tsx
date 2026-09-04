@@ -6,6 +6,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Clapperboard,
+  Filter,
   Infinity as InfinityIcon,
   Loader2,
   MonitorSmartphone,
@@ -13,6 +15,7 @@ import {
   Power,
   RotateCw,
   Trash2,
+  Tv,
   X,
 } from "lucide-react";
 import {
@@ -33,15 +36,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDevices } from "@/hooks/use-devices";
 import {
   getDevice,
   updateDevice,
   type DeviceAccess,
   type DeviceStatus,
+  type NowPlaying,
   type PortalDevice,
 } from "@/lib/api";
 import type { IptvUserWithCheck } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface DevicesDialogProps {
   open: boolean;
@@ -54,6 +60,15 @@ interface DevicesDialogProps {
 const NONE = "__none__";
 const DAY = 86_400_000;
 const DEFAULT_DAYS = 30;
+// O Player pinga a cada ~60s enquanto assiste (pareado) — folga de 3 min pra
+// considerar "online agora" sem marcar offline por um ping perdido.
+const ONLINE_MS = 3 * 60 * 1000;
+
+const NOW_PLAYING_LABEL: Record<NowPlaying["kind"], string> = {
+  live: "Ao vivo",
+  vod: "Filme",
+  series: "Série",
+};
 
 const ACCESS_META: Record<
   DeviceAccess,
@@ -119,6 +134,25 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
     return m;
   }, [servers]);
 
+  // Abrindo pelo botão de conexões de uma linha específica (App.tsx), começa
+  // filtrado nela; o toggle abaixo deixa ver todos os dispositivos.
+  const [onlyThisLine, setOnlyThisLine] = useState(Boolean(preselectServerId));
+  useEffect(() => setOnlyThisLine(Boolean(preselectServerId)), [preselectServerId, open]);
+
+  const lineServer = useMemo(
+    () => (preselectServerId ? servers.find((s) => s.id === preselectServerId) ?? null : null),
+    [servers, preselectServerId]
+  );
+  const lineDevices = useMemo(
+    () => (preselectServerId ? devices.filter((d) => d.boundServerIds.includes(preselectServerId)) : []),
+    [devices, preselectServerId]
+  );
+  const lineOnlineCount = useMemo(
+    () => lineDevices.filter((d) => Date.now() - d.lastSeenAt < ONLINE_MS).length,
+    [lineDevices]
+  );
+  const visibleDevices = onlyThisLine && preselectServerId ? lineDevices : devices;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
@@ -139,9 +173,43 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
           onSaved={() => reload(true)}
         />
 
+        {lineServer && (
+          <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-muted-foreground">
+              Linha <span className="font-medium text-foreground">{serverLabel.get(lineServer.id)}</span>
+              {lineServer.check?.activeConns != null && (
+                <>
+                  {" · "}
+                  <span className="font-medium text-foreground">
+                    {lineServer.check.activeConns}
+                    {lineServer.check.maxConnections != null ? `/${lineServer.check.maxConnections}` : ""}
+                  </span>{" "}
+                  conexões ativas no painel (qualquer aparelho, não só os seus)
+                </>
+              )}
+              {" · "}
+              {lineDevices.length} dispositivo{lineDevices.length === 1 ? "" : "s"} seu
+              {lineDevices.length === 1 ? "" : "s"} vinculado{lineDevices.length === 1 ? "" : "s"}
+              {lineDevices.length > 0 && `, ${lineOnlineCount} online agora`}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 px-2 text-xs"
+              onClick={() => setOnlyThisLine((v) => !v)}
+            >
+              <Filter className="size-3.5" />
+              {onlyThisLine ? "Ver todos os dispositivos" : "Ver só desta linha"}
+            </Button>
+          </div>
+        )}
+
         <div className="mt-2 flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">
-            {loading ? "carregando…" : `${devices.length} dispositivo${devices.length === 1 ? "" : "s"}`}
+            {loading
+              ? "carregando…"
+              : `${visibleDevices.length} dispositivo${visibleDevices.length === 1 ? "" : "s"}`}
           </span>
           <Button variant="ghost" size="sm" onClick={() => reload()}>
             <RotateCw className="size-4" /> Atualizar
@@ -151,13 +219,14 @@ export function DevicesDialog({ open, onOpenChange, servers, preselectServerId }
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <div className="flex max-h-[45vh] flex-col divide-y overflow-y-auto rounded-md border">
-          {devices.length === 0 && !loading && (
+          {visibleDevices.length === 0 && !loading && (
             <p className="p-6 text-center text-sm text-muted-foreground">
-              Nenhum dispositivo ainda. Instale o IPTV Player e informe o endereço deste portal nele —
-              o MAC aparece aqui automaticamente.
+              {onlyThisLine && preselectServerId
+                ? "Nenhum dispositivo seu está vinculado a esta linha ainda."
+                : "Nenhum dispositivo ainda. Instale o IPTV Player e informe o endereço deste portal nele — o MAC aparece aqui automaticamente."}
             </p>
           )}
-          {devices.map((d) => (
+          {visibleDevices.map((d) => (
             <DeviceRow
               key={d.mac}
               device={d}
@@ -387,13 +456,41 @@ function DeviceRow({
   useEffect(() => setDateDraft(toDateInput(device.expiresAt)), [device.expiresAt]);
 
   const showValidity = device.status !== "pending";
+  const online = Date.now() - device.lastSeenAt < ONLINE_MS;
+  const nowPlaying = online ? device.nowPlaying : null;
 
   return (
     <div className="flex flex-col gap-2 p-3 text-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-xs">{device.mac}</span>
+        <span className="flex items-center gap-1.5 font-mono text-xs">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={cn(
+                  "inline-block size-2 shrink-0 rounded-full",
+                  online ? "bg-success" : "bg-muted-foreground/30"
+                )}
+              />
+            </TooltipTrigger>
+            <TooltipContent>{online ? "Online agora" : `Visto ${relTime(device.lastSeenAt)}`}</TooltipContent>
+          </Tooltip>
+          {device.mac}
+        </span>
         <Badge variant={meta.variant}>{meta.label}</Badge>
       </div>
+
+      {nowPlaying && (
+        <div className="flex items-center gap-1.5 rounded-md bg-orange-500/10 px-2 py-1 text-xs text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-400">
+          {nowPlaying.kind === "live" ? (
+            <Tv className="size-3.5 shrink-0" />
+          ) : (
+            <Clapperboard className="size-3.5 shrink-0" />
+          )}
+          <span className="truncate">
+            Assistindo agora · {NOW_PLAYING_LABEL[nowPlaying.kind]}: <span className="font-medium">{nowPlaying.title}</span>
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         {editing ? (
