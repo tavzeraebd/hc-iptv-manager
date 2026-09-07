@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { findUser } from "../storage";
 import { getRenewalConfig } from "../paymentStore";
+import { getBrandConfig } from "../brandStore";
 import {
   readDevices,
   findDevice,
@@ -11,6 +12,7 @@ import {
   accessOf,
   isExpired,
   coerceNowPlaying,
+  coercePlaybackStats,
   type Device,
   type TrialGrant,
 } from "../deviceStore";
@@ -31,6 +33,9 @@ interface ServerCreds {
 // `server` é a principal, mantido pra compatibilidade com Players antigos.
 async function withServer(device: Device) {
   const ids = device.boundServerIds;
+  // White-label opcional (Fase 0): quando o portal tem uma marca custom, o
+  // Player usa nome/logo/cor dela; senão, `brand` vem null e fica o padrão.
+  const brand = await getBrandConfig().catch(() => null);
   const base = {
     mac: device.mac,
     name: device.name,
@@ -45,6 +50,7 @@ async function withServer(device: Device) {
     expiresAt: device.expiresAt,
     trialStartedAt: device.trialStartedAt,
     nowPlaying: device.nowPlaying,
+    brand,
   };
   if (device.status !== "active" || ids.length === 0 || isExpired(device)) {
     return { ...base, server: null as ServerCreds | null, servers: [] as ServerCreds[] };
@@ -93,6 +99,7 @@ router.post("/devices/heartbeat", async (req: Request, res: Response) => {
         model: typeof body.model === "string" ? body.model : undefined,
         platform: typeof body.platform === "string" ? body.platform : undefined,
         nowPlaying: coerceNowPlaying(body.nowPlaying),
+        playback: coercePlaybackStats(body.playback),
       },
       trialGrant
     );

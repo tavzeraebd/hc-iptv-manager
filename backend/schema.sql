@@ -48,6 +48,10 @@ alter table public.devices add column if not exists trial_started_at bigint;
 -- o que o Player está reproduzindo agora ({kind, title, startedAt} | null),
 -- reportado a cada heartbeat enquanto assiste:
 alter table public.devices add column if not exists now_playing jsonb;
+-- resumo de telemetria de reprodução (Fase 0): {sessions,stalls,errors,
+-- fallbacks,avgFirstFrameMs,lastError,lastAt} — base pras métricas de
+-- qualidade do provedor:
+alter table public.devices add column if not exists playback jsonb;
 
 create index if not exists devices_last_seen_idx on public.devices (last_seen_at desc);
 
@@ -117,5 +121,30 @@ alter table public.iptv_users      enable row level security;
 alter table public.devices         enable row level security;
 alter table public.portal_settings enable row level security;
 alter table public.payments        enable row level security;
+-- Cache de metadados enriquecidos (TMDB) por título — compartilhado por todos
+-- os aparelhos. FASE 0: só a tabela; o fetch no TMDB entra na Fase 2.
+-- `found=false` é cache negativo (o TMDB não achou nada — não re-perguntar já).
+create table if not exists public.tmdb_meta (
+  cache_key    text primary key,          -- normalize(title)|year|kind
+  kind         text not null default 'movie' check (kind in ('movie','tv')),
+  found        boolean not null default false,
+  tmdb_id      integer,
+  title        text not null default '',
+  year         integer,
+  overview     text not null default '',
+  poster_url   text,
+  backdrop_url text,
+  rating       numeric,
+  genres       jsonb  not null default '[]'::jsonb,
+  cast_json    jsonb  not null default '[]'::jsonb,
+  director     text,
+  trailer_key  text,                       -- chave do YouTube
+  runtime_min  integer,
+  fetched_at   bigint not null,
+  updated_at   bigint not null
+);
+create index if not exists tmdb_meta_updated_idx on public.tmdb_meta (updated_at desc);
+
 alter table public.watchers        enable row level security;
 alter table public.watcher_state   enable row level security;
+alter table public.tmdb_meta       enable row level security;

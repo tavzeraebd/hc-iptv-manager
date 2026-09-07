@@ -6,6 +6,7 @@ import usersRouter from "./routes/users";
 import devicesRouter from "./routes/devices";
 import paymentsRouter from "./routes/payments";
 import watchersRouter from "./routes/watchers";
+import metaRouter from "./routes/meta";
 import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
 import { mpConfigured } from "./mercadopago";
@@ -55,6 +56,9 @@ const PUBLIC_API: { method: string; re: RegExp }[] = [
   { method: "GET", re: /(^|\/)devices\/[^/]+\/watchers(\/.*)?$/ },
   { method: "PUT", re: /(^|\/)devices\/[^/]+\/watchers(\/.*)?$/ },
   { method: "DELETE", re: /(^|\/)devices\/[^/]+\/watchers\/[^/]+\/?$/ },
+  // Metadados enriquecidos (TMDB) — o Player só LÊ, sem token. O PUT (seed
+  // manual) continua atrás do guard de admin.
+  { method: "GET", re: /(^|\/)meta\/?$/ },
 ];
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {
   if (PUBLIC_API.some((p) => p.method === req.method && p.re.test(req.path))) {
@@ -68,6 +72,7 @@ app.use("/api", usersRouter);
 app.use("/api", devicesRouter);
 app.use("/api", paymentsRouter);
 app.use("/api", watchersRouter);
+app.use("/api", metaRouter);
 
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
 if (fs.existsSync(frontendDist)) {

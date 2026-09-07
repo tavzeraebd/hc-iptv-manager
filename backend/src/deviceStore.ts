@@ -44,6 +44,9 @@ export interface Device {
    * enquanto assiste. null = parado/navegando. Só existe pra devices que
    * entraram via pareamento (o portal não sabe de nada rodando fora dele). */
   nowPlaying: NowPlaying | null;
+  /** Resumo de telemetria de reprodução (Fase 0) reportado pelo Player.
+   * null = nunca reportou. Base pras métricas de qualidade do provedor. */
+  playback: PlaybackStats | null;
 }
 
 export interface NowPlaying {
@@ -51,6 +54,17 @@ export interface NowPlaying {
   title: string;
   /** Quando começou a tocar este item (epoch ms). */
   startedAt: number;
+}
+
+/** Contadores da janela recente do Player (últimas dezenas de reproduções). */
+export interface PlaybackStats {
+  sessions: number;
+  stalls: number;
+  errors: number;
+  fallbacks: number;
+  avgFirstFrameMs: number | null;
+  lastError: string | null;
+  lastAt: number | null;
 }
 
 const NOW_PLAYING_KINDS = new Set(["live", "vod", "series"]);
@@ -67,6 +81,27 @@ export function coerceNowPlaying(raw: unknown): NowPlaying | null {
   return { kind: o.kind as NowPlaying["kind"], title: o.title.trim().slice(0, 200), startedAt };
 }
 
+const int0 = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : 0);
+const intOrNull = (v: unknown) =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : null;
+
+/** `undefined` quando o heartbeat não mandou nada (Player antigo — não mexe no
+ * que já está salvo); um objeto saneado, ou `null`, quando mandou. */
+export function coercePlaybackStats(raw: unknown): PlaybackStats | null | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  return {
+    sessions: int0(o.sessions),
+    stalls: int0(o.stalls),
+    errors: int0(o.errors),
+    fallbacks: int0(o.fallbacks),
+    avgFirstFrameMs: intOrNull(o.avgFirstFrameMs),
+    lastError: typeof o.lastError === "string" ? o.lastError.slice(0, 200) : null,
+    lastAt: intOrNull(o.lastAt),
+  };
+}
+
 export interface HeartbeatInput {
   mac: string;
   name?: string;
@@ -74,6 +109,8 @@ export interface HeartbeatInput {
   platform?: string;
   /** `undefined` = não informado (Player antigo); `null`/objeto = estado atual. */
   nowPlaying?: NowPlaying | null;
+  /** `undefined` = não informado; senão o resumo de telemetria de reprodução. */
+  playback?: PlaybackStats | null;
 }
 
 /** Concessão de teste grátis a aplicar SÓ quando o device é criado agora (1º
@@ -213,6 +250,7 @@ function parseLine(line: string): Device | null {
       expiresAt: typeof p.expiresAt === "number" ? p.expiresAt : null,
       trialStartedAt: typeof p.trialStartedAt === "number" ? p.trialStartedAt : null,
       nowPlaying: coerceNowPlaying(p.nowPlaying),
+      playback: coercePlaybackStats(p.playback) ?? null,
     };
   } catch {
     return null;
@@ -264,6 +302,7 @@ async function fileUpsertFromHeartbeat(
       expiresAt: trialGrant ? trialGrant.expiresAt : null,
       trialStartedAt: trialGrant ? now : null,
       nowPlaying: input.nowPlaying ?? null,
+      playback: input.playback ?? null,
     };
     devices.push(created);
     await fileWriteDevices(devices);
@@ -281,6 +320,8 @@ async function fileUpsertFromHeartbeat(
     // Estado ao vivo — sempre reflete o último heartbeat, nunca "mantém o
     // anterior se não vier" (senão "assistindo X" nunca some quando pausa).
     nowPlaying: input.nowPlaying ?? null,
+    // Telemetria: só sobrescreve quando o Player mandou (Player antigo omite).
+    playback: input.playback !== undefined ? input.playback : existing.playback,
   };
   devices[idx] = updated;
   await fileWriteDevices(devices);
@@ -307,6 +348,7 @@ async function fileUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<D
       expiresAt: null,
       trialStartedAt: null,
       nowPlaying: null,
+      playback: null,
     });
     idx = devices.length - 1;
   }
@@ -353,6 +395,7 @@ interface DeviceRow {
   expires_at: number | string | null;
   trial_started_at: number | string | null;
   now_playing: unknown;
+  playback: unknown;
 }
 
 function rowToDevice(r: DeviceRow): Device {
@@ -368,6 +411,7 @@ function rowToDevice(r: DeviceRow): Device {
     expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
     trialStartedAt: r.trial_started_at != null ? Number(r.trial_started_at) : null,
     nowPlaying: coerceNowPlaying(r.now_playing),
+    playback: coercePlaybackStats(r.playback) ?? null,
   };
 }
 
@@ -406,6 +450,8 @@ async function sbUpsertFromHeartbeat(
   if (input.name != null && input.name.trim()) meta.name = input.name.trim();
   if (input.model != null && input.model.trim()) meta.model = input.model.trim();
   if (input.platform != null && input.platform.trim()) meta.platform = input.platform.trim();
+  // telemetria: só grava quando veio no heartbeat (Player antigo omite).
+  if (input.playback !== undefined) meta.playback = input.playback;
 
   // 1) tenta ATUALIZAR um registro existente (caminho comum; idempotente,
   //    então heartbeats concorrentes depois do 1º não se atropelam).
@@ -424,6 +470,7 @@ async function sbUpsertFromHeartbeat(
     last_seen_at: now,
     status: trialGrant ? "active" : "pending",
     now_playing: input.nowPlaying ?? null,
+    playback: input.playback ?? null,
   };
   if (trialGrant) {
     insertRow.bound_server_id = trialGrant.serverId;
@@ -474,6 +521,7 @@ async function sbUpdateDevice(mac: string, patch: DeviceAdminPatch): Promise<Dev
         expires_at: null,
         trial_started_at: null,
         now_playing: null,
+        playback: null,
       });
   }
 
