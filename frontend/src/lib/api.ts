@@ -437,6 +437,13 @@ export async function deleteDevice(mac: string): Promise<void> {
 // Renovação / pagamento (PIX via Mercado Pago) — config editável do portal.
 // ---------------------------------------------------------------------------
 
+export interface RenewalPlan {
+  id: string;
+  label: string;
+  months: number;
+  priceCents: number;
+}
+
 export interface RenewalSettings {
   priceCents: number;
   months: number;
@@ -449,6 +456,10 @@ export interface RenewalSettings {
   trialEnabled: boolean;
   trialServerId: string | null;
   trialHours: number;
+  /** p-4: planos alternativos (upgrade). Vazio = só o plano base. */
+  plans: RenewalPlan[];
+  /** p-4: dias creditados a quem indicou, no 1º pagamento do indicado. */
+  referralBonusDays: number;
 }
 
 export type RenewalSettingsPatch = Partial<
@@ -462,6 +473,8 @@ export type RenewalSettingsPatch = Partial<
     | "trialEnabled"
     | "trialServerId"
     | "trialHours"
+    | "plans"
+    | "referralBonusDays"
   >
 >;
 

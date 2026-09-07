@@ -67,6 +67,9 @@ export function RenewalSettingsDialog({
   const [trialOn, setTrialOn] = useState(false);
   const [trialServer, setTrialServer] = useState<string>(NONE);
   const [trialHours, setTrialHours] = useState("1");
+  // p-4: planos alternativos (upgrade) + bônus de indicação.
+  const [plans, setPlans] = useState<{ label: string; months: string; price: string }[]>([]);
+  const [referralDays, setReferralDays] = useState("0");
 
   useEffect(() => {
     if (!open) return;
@@ -83,6 +86,14 @@ export function RenewalSettingsDialog({
         setPromoUntil(tsToDate(s.promoUntil));
         setTrialOn(s.trialEnabled);
         setTrialServer(s.trialServerId ?? NONE);
+        setPlans(
+          (s.plans ?? []).map((p) => ({
+            label: p.label,
+            months: String(p.months),
+            price: centsToReais(p.priceCents),
+          }))
+        );
+        setReferralDays(String(s.referralBonusDays ?? 0));
         setTrialHours(String(s.trialHours || 1));
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : "Erro ao carregar."))
@@ -122,6 +133,17 @@ export function RenewalSettingsDialog({
     patch.trialEnabled = trialOn;
     patch.trialServerId = trialOn && trialServer !== NONE ? trialServer : null;
     patch.trialHours = Math.min(720, Math.max(1, parseInt(trialHours || "1", 10)));
+
+    // p-4: planos alternativos — só entram os com meses ≥ 1 e preço ≥ R$ 1.
+    patch.plans = plans
+      .map((p) => ({
+        label: p.label.trim(),
+        months: parseInt(p.months || "0", 10),
+        priceCents: reaisToCents(p.price),
+      }))
+      .filter((p) => p.months >= 1 && Number.isFinite(p.priceCents) && p.priceCents >= 100)
+      .map((p) => ({ id: `p${p.months}m${p.priceCents}`, ...p }));
+    patch.referralBonusDays = Math.min(365, Math.max(0, parseInt(referralDays || "0", 10)));
 
     setSaving(true);
     try {
@@ -294,6 +316,96 @@ export function RenewalSettingsDialog({
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* p-4: planos alternativos (upgrade) */}
+              <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Planos alternativos (upgrade)</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setPlans((p) => [...p, { label: "", months: "3", price: "49.90" }].slice(0, 6))
+                    }
+                  >
+                    + Plano
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  O plano base acima é sempre oferecido. Estes aparecem como opção de upgrade no app.
+                </p>
+                {plans.map((pl, i) => (
+                  <div key={i} className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <Label className="text-xs">Nome</Label>
+                      <Input
+                        placeholder="Trimestral"
+                        value={pl.label}
+                        onChange={(e) =>
+                          setPlans((p) => p.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))
+                        }
+                      />
+                    </div>
+                    <div className="w-20">
+                      <Label className="text-xs">Meses</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={pl.months}
+                        onChange={(e) =>
+                          setPlans((p) => p.map((x, j) => (j === i ? { ...x, months: e.target.value } : x)))
+                        }
+                      />
+                    </div>
+                    <div className="w-24">
+                      <Label className="text-xs">R$</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={pl.price}
+                        onChange={(e) =>
+                          setPlans((p) => p.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))
+                        }
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setPlans((p) => p.filter((_, j) => j !== i))}
+                      aria-label="Remover plano"
+                    >
+                      ×
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {/* p-4: bônus de indicação */}
+              <div className="flex items-end gap-3 rounded-md border bg-muted/20 p-3">
+                <div className="flex-1">
+                  <Label htmlFor="r-referral" className="text-sm font-medium">
+                    Bônus de indicação
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Dias creditados a quem indica, no 1º pagamento do indicado. 0 = sem bônus
+                    automático (você credita à mão em "Dispositivos").
+                  </p>
+                </div>
+                <div className="w-24">
+                  <Label htmlFor="r-referral" className="text-xs">
+                    Dias
+                  </Label>
+                  <Input
+                    id="r-referral"
+                    type="number"
+                    min={0}
+                    max={365}
+                    value={referralDays}
+                    onChange={(e) => setReferralDays(e.target.value)}
+                  />
+                </div>
               </div>
             </>
           )}

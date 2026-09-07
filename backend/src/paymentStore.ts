@@ -28,6 +28,15 @@ export interface Payment {
   processed: boolean;
 }
 
+/** Plano alternativo de renovação (p-4 · upgrade de plano). Vazio = só o
+ * plano base (priceCents/months). O Player mostra um seletor quando há > 0. */
+export interface RenewalPlan {
+  id: string;
+  label: string;
+  months: number;
+  priceCents: number;
+}
+
 export interface RenewalConfig {
   priceCents: number;
   months: number;
@@ -41,6 +50,11 @@ export interface RenewalConfig {
   trialEnabled?: boolean;
   trialServerId?: string | null;
   trialHours?: number;
+  /** p-4: planos alternativos (upgrade). O base sempre existe (priceCents/months). */
+  plans?: RenewalPlan[];
+  /** p-4: dias de bônus creditados a quem indicou, no 1º pagamento do indicado.
+   * 0 = indicação sem bônus automático. */
+  referralBonusDays?: number;
 }
 
 const DEFAULT_CONFIG: RenewalConfig = {
@@ -50,6 +64,8 @@ const DEFAULT_CONFIG: RenewalConfig = {
   trialEnabled: false,
   trialServerId: null,
   trialHours: 1,
+  plans: [],
+  referralBonusDays: 0,
 };
 
 function ensureSb() {
@@ -81,7 +97,29 @@ function coerceConfig(v: unknown): RenewalConfig {
     trialEnabled: o.trialEnabled === true,
     trialServerId: typeof o.trialServerId === "string" && o.trialServerId ? o.trialServerId : null,
     trialHours: Math.min(720, Math.max(1, Math.round(num(o.trialHours, DEFAULT_CONFIG.trialHours!)))),
+    plans: coercePlans(o.plans),
+    referralBonusDays: Math.min(365, Math.max(0, Math.round(num(o.referralBonusDays, 0)))),
   };
+}
+
+function coercePlans(v: unknown): RenewalPlan[] {
+  if (!Array.isArray(v)) return [];
+  const out: RenewalPlan[] = [];
+  for (const raw of v.slice(0, 6)) {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    const months = Math.round(Number(o.months));
+    const priceCents = Math.round(Number(o.priceCents));
+    const label = typeof o.label === "string" ? o.label.trim().slice(0, 40) : "";
+    if (!Number.isFinite(months) || months < 1 || !Number.isFinite(priceCents) || priceCents < 100) {
+      continue;
+    }
+    const id =
+      typeof o.id === "string" && o.id.trim()
+        ? o.id.trim().slice(0, 24)
+        : `p${months}m${priceCents}`;
+    out.push({ id, label: label || `${months} ${months === 1 ? "mês" : "meses"}`, months, priceCents });
+  }
+  return out;
 }
 
 export async function getRenewalConfig(): Promise<RenewalConfig> {

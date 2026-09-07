@@ -61,6 +61,10 @@ router.get("/renewal/info", async (_req: Request, res: Response) => {
       priceCents: effectivePriceCents(cfg),
       months: cfg.months,
       providerConfigured: mpConfigured(),
+      // p-4: planos alternativos (upgrade). Vazio = só o plano base acima.
+      plans: cfg.plans ?? [],
+      // p-4: bônus de indicação em dias (0 = sem bônus automático).
+      referralBonusDays: cfg.referralBonusDays ?? 0,
     });
   } catch {
     res.status(500).json({ error: "Não foi possível carregar as informações de renovação." });
@@ -91,16 +95,22 @@ router.post("/devices/:mac/renewal", async (req: Request, res: Response) => {
       return;
     }
 
-    // Reaproveita uma cobrança pendente e ainda válida (evita spammar o MP).
+    const cfg = await getRenewalConfig();
+    // p-4: upgrade de plano — o Player pode mandar um planId; se casar com um
+    // plano configurado, usa os meses/preço dele. Senão, plano base (+ promo).
+    const planId = typeof req.body?.planId === "string" ? req.body.planId : "";
+    const plan = planId ? (cfg.plans ?? []).find((p) => p.id === planId) : undefined;
+    const amountCents = plan ? plan.priceCents : effectivePriceCents(cfg);
+    const months = plan ? plan.months : cfg.months;
+
+    // Reaproveita uma cobrança pendente só se for do mesmo plano (evita spammar
+    // o MP, mas deixa trocar de plano gerando uma nova).
     const open = await getOpenPaymentForDevice(mac);
-    if (open) {
+    if (open && open.months === months && open.amountCents === amountCents) {
       res.json(publicPayment(open));
       return;
     }
 
-    const cfg = await getRenewalConfig();
-    const amountCents = effectivePriceCents(cfg);
-    const months = cfg.months;
     const id = newPaymentId();
     const expiresAt = Date.now() + cfg.qrTtlMin * 60_000;
 
@@ -249,6 +259,8 @@ router.put("/settings/renewal", async (req: Request, res: Response) => {
   if (b.promoUntil === null || typeof b.promoUntil === "number") patch.promoUntil = b.promoUntil;
   if (typeof b.trialEnabled === "boolean") patch.trialEnabled = b.trialEnabled;
   if (typeof b.trialHours === "number") patch.trialHours = b.trialHours;
+  if (Array.isArray(b.plans)) patch.plans = b.plans; // p-4 — coerceConfig valida
+  if (typeof b.referralBonusDays === "number") patch.referralBonusDays = b.referralBonusDays;
   if (b.trialServerId === null || b.trialServerId === "") {
     patch.trialServerId = null;
   } else if (typeof b.trialServerId === "string") {
