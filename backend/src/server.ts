@@ -8,6 +8,7 @@ import paymentsRouter from "./routes/payments";
 import watchersRouter from "./routes/watchers";
 import metaRouter from "./routes/meta";
 import subtitlesRouter from "./routes/subtitles";
+import whatsNewRouter from "./routes/whatsNew";
 import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
 import { mpConfigured } from "./mercadopago";
@@ -64,6 +65,8 @@ const PUBLIC_API: { method: string; re: RegExp }[] = [
   { method: "GET", re: /(^|\/)meta\/?$/ },
   // Legenda externa (OpenSubtitles) — o Player só LÊ, sem token.
   { method: "GET", re: /(^|\/)subtitles\/?$/ },
+  // Config de "Novidades pra você" (f5-4) — o Player só LÊ, sem token.
+  { method: "GET", re: /(^|\/)whats-new\/?$/ },
 ];
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {
   if (PUBLIC_API.some((p) => p.method === req.method && p.re.test(req.path))) {
@@ -79,6 +82,7 @@ app.use("/api", paymentsRouter);
 app.use("/api", watchersRouter);
 app.use("/api", metaRouter);
 app.use("/api", subtitlesRouter);
+app.use("/api", whatsNewRouter);
 
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
 if (fs.existsSync(frontendDist)) {
