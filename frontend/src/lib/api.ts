@@ -523,6 +523,32 @@ export async function updateNoticeSettings(patch: Partial<NoticeSettings>): Prom
   return handle<NoticeSettings>(res);
 }
 
+// Analytics pro provedor (trilha do provedor p-3).
+export interface ProviderAnalytics {
+  generatedAt: number;
+  totals: { devices: number; active: number; expiringSoon: number; expired: number; pending: number };
+  seen: { today: number; d3: number; d7: number; d14: number; d30: number; older: number; never: number };
+  atRisk: { mac: string; name: string; lastSeenAt: number; daysSince: number }[];
+  watchingNow: number;
+  playing: { title: string; kind: string; count: number }[];
+  health: {
+    reportingDevices: number;
+    sessions: number;
+    stalls: number;
+    errors: number;
+    fallbacks: number;
+    stallRate: number;
+    errorRate: number;
+    fallbackRate: number;
+    avgFirstFrameMs: number | null;
+  };
+}
+
+export async function getAnalytics(): Promise<ProviderAnalytics> {
+  const res = await apiFetch("/analytics", { cache: "no-store" });
+  return handle<ProviderAnalytics>(res);
+}
+
 export interface DevicePayment {
   id: string;
   status: "pending" | "paid" | "expired" | "error" | "cancelled";

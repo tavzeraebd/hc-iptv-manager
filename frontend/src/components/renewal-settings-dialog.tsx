@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
-import { CreditCard, Loader2, Megaphone, Palette } from "lucide-react";
+import { BarChart3, CreditCard, Loader2, Megaphone, Palette } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -29,10 +29,11 @@ interface RenewalSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   servers: IptvUserWithCheck[];
-  /** Atalhos da central de config do provedor: "Marca do app" (p-1) e
-   * "Aviso no app" (p-2). */
+  /** Atalhos da central de config do provedor: "Marca do app" (p-1),
+   * "Aviso no app" (p-2) e "Analytics" (p-3). */
   onOpenBranding?: () => void;
   onOpenNotice?: () => void;
+  onOpenAnalytics?: () => void;
 }
 
 const reaisToCents = (v: string) => Math.round(parseFloat(v.replace(",", ".")) * 100);
@@ -52,6 +53,7 @@ export function RenewalSettingsDialog({
   servers,
   onOpenBranding,
   onOpenNotice,
+  onOpenAnalytics,
 }: RenewalSettingsDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -306,6 +308,11 @@ export function RenewalSettingsDialog({
               {onOpenNotice && (
                 <Button type="button" variant="ghost" size="sm" onClick={onOpenNotice}>
                   <Megaphone className="size-4" /> Aviso…
+                </Button>
+              )}
+              {onOpenAnalytics && (
+                <Button type="button" variant="ghost" size="sm" onClick={onOpenAnalytics}>
+                  <BarChart3 className="size-4" /> Analytics…
                 </Button>
               )}
             </div>
