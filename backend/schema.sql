@@ -87,7 +87,35 @@ create index if not exists payments_status_idx       on public.payments (status)
 -- RLS ligada e SEM policies: só a chave secreta (service_role) acessa. A
 -- chave publishable/anon fica bloqueada de ler ou escrever qualquer coisa —
 -- defesa em profundidade caso ela vaze (ela não é secreta).
+-- Perfis de espectador ("Watcher") por device — estilo Netflix, até 4 por MAC.
+-- Sincronizados pelo Player (rotas /api/devices/:mac/watchers*, sem token).
+create table if not exists public.watchers (
+  mac        text not null references public.devices(mac) on delete cascade,
+  id         text not null,               -- uuid gerado pelo Player
+  name       text not null default '',
+  avatar_id  text not null default '',
+  created_at bigint not null,
+  updated_at bigint not null,
+  primary key (mac, id)
+);
+
+-- Estado pessoal de cada perfil: progresso de "continuar assistindo",
+-- favoritos e sinais do motor de recomendação. Blob JSON, um por (mac, watcher).
+create table if not exists public.watcher_state (
+  mac         text not null,
+  watcher_id  text not null,
+  progress    jsonb  not null default '{}'::jsonb,
+  favorites   jsonb  not null default '{}'::jsonb,
+  reco_events jsonb  not null default '[]'::jsonb,
+  reco_meta   jsonb  not null default '{}'::jsonb,
+  updated_at  bigint not null,
+  primary key (mac, watcher_id),
+  foreign key (mac, watcher_id) references public.watchers(mac, id) on delete cascade
+);
+
 alter table public.iptv_users      enable row level security;
 alter table public.devices         enable row level security;
 alter table public.portal_settings enable row level security;
 alter table public.payments        enable row level security;
+alter table public.watchers        enable row level security;
+alter table public.watcher_state   enable row level security;

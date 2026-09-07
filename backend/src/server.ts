@@ -5,6 +5,7 @@ import fs from "fs";
 import usersRouter from "./routes/users";
 import devicesRouter from "./routes/devices";
 import paymentsRouter from "./routes/payments";
+import watchersRouter from "./routes/watchers";
 import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
 import { mpConfigured } from "./mercadopago";
@@ -24,6 +25,11 @@ const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.HOST || "0.0.0.0";
 
 app.use(cors());
+// O blob de estado de um perfil de espectador (progresso + favoritos + sinais
+// de reco) passa fácil dos 100 KB. Este parser roda ANTES do global só pra esse
+// path: marca o corpo como parseado, então o `express.json({ limit: "100kb" })`
+// abaixo pula essas rotas; todo o resto da API segue no teto de 100 KB.
+app.use("/api/devices/:mac/watchers", express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "100kb" }));
 
 // Health check público (fora de /api, então não passa pelo guard de token) —
@@ -45,6 +51,10 @@ const PUBLIC_API: { method: string; re: RegExp }[] = [
   { method: "GET", re: /(^|\/)payments\/[^/]+\/?$/ },
   { method: "GET", re: /(^|\/)renewal\/info\/?$/ },
   { method: "POST", re: /(^|\/)webhooks\/[^/]+\/?$/ },
+  // Perfis de espectador — o Player lê/grava sem token (só por MAC).
+  { method: "GET", re: /(^|\/)devices\/[^/]+\/watchers(\/.*)?$/ },
+  { method: "PUT", re: /(^|\/)devices\/[^/]+\/watchers(\/.*)?$/ },
+  { method: "DELETE", re: /(^|\/)devices\/[^/]+\/watchers\/[^/]+\/?$/ },
 ];
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {
   if (PUBLIC_API.some((p) => p.method === req.method && p.re.test(req.path))) {
@@ -57,6 +67,7 @@ app.use("/api", (req: Request, res: Response, next: NextFunction) => {
 app.use("/api", usersRouter);
 app.use("/api", devicesRouter);
 app.use("/api", paymentsRouter);
+app.use("/api", watchersRouter);
 
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
 if (fs.existsSync(frontendDist)) {
