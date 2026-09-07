@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
-import { CreditCard, Loader2, Palette } from "lucide-react";
+import { CreditCard, Loader2, Megaphone, Palette } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -29,9 +29,10 @@ interface RenewalSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   servers: IptvUserWithCheck[];
-  /** Abre o diálogo de "Marca do app" (white-label, p-1) — atalho a partir
-   * daqui, que é a central de config do provedor. */
+  /** Atalhos da central de config do provedor: "Marca do app" (p-1) e
+   * "Aviso no app" (p-2). */
   onOpenBranding?: () => void;
+  onOpenNotice?: () => void;
 }
 
 const reaisToCents = (v: string) => Math.round(parseFloat(v.replace(",", ".")) * 100);
@@ -50,6 +51,7 @@ export function RenewalSettingsDialog({
   onOpenChange,
   servers,
   onOpenBranding,
+  onOpenNotice,
 }: RenewalSettingsDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -295,13 +297,18 @@ export function RenewalSettingsDialog({
           )}
 
           <DialogFooter className="gap-2 sm:justify-between">
-            {onOpenBranding ? (
-              <Button type="button" variant="ghost" onClick={onOpenBranding}>
-                <Palette className="size-4" /> Marca do app…
-              </Button>
-            ) : (
-              <span />
-            )}
+            <div className="flex flex-wrap gap-1">
+              {onOpenBranding && (
+                <Button type="button" variant="ghost" size="sm" onClick={onOpenBranding}>
+                  <Palette className="size-4" /> Marca…
+                </Button>
+              )}
+              {onOpenNotice && (
+                <Button type="button" variant="ghost" size="sm" onClick={onOpenNotice}>
+                  <Megaphone className="size-4" /> Aviso…
+                </Button>
+              )}
+            </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancelar

@@ -10,6 +10,7 @@ import metaRouter from "./routes/meta";
 import subtitlesRouter from "./routes/subtitles";
 import whatsNewRouter from "./routes/whatsNew";
 import brandRouter from "./routes/brand";
+import noticeRouter from "./routes/notice";
 import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
 import { mpConfigured } from "./mercadopago";
@@ -85,6 +86,7 @@ app.use("/api", metaRouter);
 app.use("/api", subtitlesRouter);
 app.use("/api", whatsNewRouter);
 app.use("/api", brandRouter);
+app.use("/api", noticeRouter);
 
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
 if (fs.existsSync(frontendDist)) {

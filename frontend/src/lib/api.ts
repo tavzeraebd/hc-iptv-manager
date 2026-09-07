@@ -501,6 +501,28 @@ export async function updateBrandSettings(patch: Partial<BrandSettings>): Promis
   return handle<BrandSettings>(res);
 }
 
+// Aviso do provedor no app (trilha do provedor p-2). text vazio = sem aviso.
+export interface NoticeSettings {
+  text: string;
+  kind: "info" | "warn";
+  /** Epoch ms — some sozinho depois disso. null = sem prazo. */
+  until: number | null;
+}
+
+export async function getNoticeSettings(): Promise<NoticeSettings> {
+  const res = await apiFetch("/settings/notice", { cache: "no-store" });
+  return handle<NoticeSettings>(res);
+}
+
+export async function updateNoticeSettings(patch: Partial<NoticeSettings>): Promise<NoticeSettings> {
+  const res = await apiFetch("/settings/notice", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return handle<NoticeSettings>(res);
+}
+
 export interface DevicePayment {
   id: string;
   status: "pending" | "paid" | "expired" | "error" | "cancelled";

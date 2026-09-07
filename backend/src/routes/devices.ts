@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { findUser } from "../storage";
 import { getRenewalConfig } from "../paymentStore";
 import { getBrandConfig } from "../brandStore";
+import { getNoticeConfig } from "../noticeStore";
 import {
   readDevices,
   findDevice,
@@ -36,6 +37,9 @@ async function withServer(device: Device) {
   // White-label opcional (Fase 0): quando o portal tem uma marca custom, o
   // Player usa nome/logo/cor dela; senão, `brand` vem null e fica o padrão.
   const brand = await getBrandConfig().catch(() => null);
+  // Aviso do provedor no app (p-2): frase curta no topo do Player. null =
+  // sem aviso ativo (texto vazio ou já expirado).
+  const notice = await getNoticeConfig().catch(() => null);
   const base = {
     mac: device.mac,
     name: device.name,
@@ -51,6 +55,7 @@ async function withServer(device: Device) {
     trialStartedAt: device.trialStartedAt,
     nowPlaying: device.nowPlaying,
     brand,
+    notice,
   };
   if (device.status !== "active" || ids.length === 0 || isExpired(device)) {
     return { ...base, server: null as ServerCreds | null, servers: [] as ServerCreds[] };
