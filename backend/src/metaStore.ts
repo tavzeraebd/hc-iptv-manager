@@ -35,20 +35,38 @@ export interface MetaRecord {
 
 const KIND = new Set(["movie", "tv"]);
 
-// Normaliza título p/ chave estável: minúsculo, sem acento, sem pontuação,
-// espaços colapsados. Ano ausente vira "0". kind default "movie".
-export function metaCacheKey(title: unknown, year: unknown, kind: unknown): string | null {
-  if (typeof title !== "string") return null;
-  const t = title
+// Ruído comum em nome de catálogo IPTV que atrapalha a busca no TMDB e
+// impede o dedupe de cache ("Oppenheimer (2023) 4K" vs "Oppenheimer").
+const NOISE_TOKENS = new Set([
+  "4k", "uhd", "fhd", "hd", "sd", "hdr", "hevc", "h264", "h265", "x264", "x265",
+  "dolby", "atmos", "remux", "bluray", "webdl", "webrip", "web", "dl", "rip",
+  "dublado", "legendado", "leg", "dub", "nac", "dual", "audio", "1080", "1080p",
+  "720", "720p", "2160", "2160p", "480", "480p", "l",
+]);
+
+/** Título "cru" → forma limpa p/ busca/chave: sem acento, sem pontuação,
+ * sem "(AAAA)" nem tags de qualidade/formato/idioma, espaços colapsados. */
+export function cleanTitle(raw: string): string {
+  const base = raw
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
+    .replace(/\[[^\]]*\]/g, " ") // [L], [DUB]
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
-    .replace(/\s+/g, " ")
-    .slice(0, 120);
+    .split(/\s+/)
+    .filter((tok) => tok && !NOISE_TOKENS.has(tok) && !/^\d{4}$/.test(tok)); // dropa ano solto e tokens de ruído
+  return base.join(" ").slice(0, 120);
+}
+
+// Normaliza título p/ chave estável. Ano ausente vira "0". kind default "movie".
+export function metaCacheKey(title: unknown, year: unknown, kind: unknown): string | null {
+  if (typeof title !== "string") return null;
+  const t = cleanTitle(title);
   if (!t) return null;
-  const y = Number.parseInt(String(year ?? ""), 10);
+  // ano do parâmetro OU do "(AAAA)" no título cru
+  const yFromTitle = title.match(/\b(19|20)\d{2}\b/)?.[0];
+  const y = Number.parseInt(String(year ?? yFromTitle ?? ""), 10);
   const yy = Number.isFinite(y) && y > 1870 && y < 2100 ? y : 0;
   const k = kind === "tv" || kind === "series" ? "tv" : "movie";
   return `${t}|${yy}|${k}`;

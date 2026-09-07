@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { getMeta, putMeta, metaCacheKey, coerceMeta, type MetaRecord } from "../metaStore";
+import { getMeta, putMeta, metaCacheKey, coerceMeta, cleanTitle, type MetaRecord } from "../metaStore";
 import { tmdbConfigured, enrichFromTmdb } from "../tmdb";
 
 // GET /api/meta?title=&year=&kind=  — metadados enriquecidos por título.
@@ -82,8 +82,10 @@ router.get("/meta", async (req: Request, res: Response) => {
       return;
     }
 
-    const title = typeof req.query.title === "string" ? req.query.title : "";
-    const y = Number.parseInt(String(req.query.year ?? ""), 10);
+    const rawTitle = typeof req.query.title === "string" ? req.query.title : "";
+    const title = cleanTitle(rawTitle); // sem "(AAAA)" nem "4K" etc. — o TMDB search não tolera
+    const yFromTitle = rawTitle.match(/\b(19|20)\d{2}\b/)?.[0];
+    const y = Number.parseInt(String(req.query.year ?? yFromTitle ?? ""), 10);
     const year = Number.isFinite(y) && y > 1870 && y < 2100 ? y : null;
     const fresh = await fetchAndCache(key, title, year, kindOf(req.query.kind));
     res.json({ ...publicShape(fresh), cached: false, stale: false });

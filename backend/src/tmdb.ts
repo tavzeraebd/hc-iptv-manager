@@ -120,7 +120,9 @@ function pickTrailerKey(videos: unknown): string | null {
 }
 
 async function fetchDetails(tmdbId: number, kind: TmdbKind): Promise<TmdbEnrichment> {
-  const base = await tmdbGet(`/${kind}/${tmdbId}?language=pt-BR&append_to_response=credits,videos`);
+  const base = await tmdbGet(
+    `/${kind}/${tmdbId}?language=pt-BR&append_to_response=credits,videos&include_video_language=pt,en,null`
+  );
   if (!base) return NOT_FOUND;
 
   // Sinopse costuma faltar em pt-BR — completa com en-US.
