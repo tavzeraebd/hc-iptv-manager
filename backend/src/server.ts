@@ -7,10 +7,12 @@ import devicesRouter from "./routes/devices";
 import paymentsRouter from "./routes/payments";
 import watchersRouter from "./routes/watchers";
 import metaRouter from "./routes/meta";
+import subtitlesRouter from "./routes/subtitles";
 import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
 import { mpConfigured } from "./mercadopago";
 import { tmdbConfigured } from "./tmdb";
+import { osConfigured } from "./opensubtitles";
 
 // Rede de segurança: uma rejeição não tratada em qualquer handler async
 // (Express 4 não as captura) derrubaria o processo. Num portal hospedado isso
@@ -60,6 +62,8 @@ const PUBLIC_API: { method: string; re: RegExp }[] = [
   // Metadados enriquecidos (TMDB) — o Player só LÊ, sem token. O PUT (seed
   // manual) continua atrás do guard de admin.
   { method: "GET", re: /(^|\/)meta\/?$/ },
+  // Legenda externa (OpenSubtitles) — o Player só LÊ, sem token.
+  { method: "GET", re: /(^|\/)subtitles\/?$/ },
 ];
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {
   if (PUBLIC_API.some((p) => p.method === req.method && p.re.test(req.path))) {
@@ -74,6 +78,7 @@ app.use("/api", devicesRouter);
 app.use("/api", paymentsRouter);
 app.use("/api", watchersRouter);
 app.use("/api", metaRouter);
+app.use("/api", subtitlesRouter);
 
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
 if (fs.existsSync(frontendDist)) {
@@ -101,5 +106,8 @@ app.listen(PORT, HOST, () => {
   );
   console.log(
     `  metadados (TMDB): ${tmdbConfigured() ? "configurado" : "não configurado (TMDB_API_KEY ausente)"}`
+  );
+  console.log(
+    `  legendas externas (OpenSubtitles): ${osConfigured() ? "configurado" : "não configurado (OPENSUBTITLES_API_KEY ausente)"}`
   );
 });
