@@ -14,6 +14,7 @@ import { DeleteUserDialog } from "@/components/delete-user-dialog";
 import { ServerSettingsDialog } from "@/components/server-settings-dialog";
 import { DevicesDialog } from "@/components/devices-dialog";
 import { RenewalSettingsDialog } from "@/components/renewal-settings-dialog";
+import { BrandingSettingsDialog } from "@/components/branding-settings-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
 import { useDevices } from "@/hooks/use-devices";
@@ -69,6 +70,7 @@ function Dashboard({ onLock }: { onLock: () => void }) {
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [devicesMode, setDevicesMode] = useState<"manage" | "connections">("manage");
   const [renewalOpen, setRenewalOpen] = useState(false);
+  const [brandingOpen, setBrandingOpen] = useState(false);
   const [devicesPreselect, setDevicesPreselect] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<IptvUserWithCheck | null>(null);
   const [deletingUser, setDeletingUser] = useState<IptvUserWithCheck | null>(null);
@@ -232,7 +234,17 @@ function Dashboard({ onLock }: { onLock: () => void }) {
           {...devicesState}
         />
 
-        <RenewalSettingsDialog open={renewalOpen} onOpenChange={setRenewalOpen} servers={users} />
+        <RenewalSettingsDialog
+          open={renewalOpen}
+          onOpenChange={setRenewalOpen}
+          servers={users}
+          onOpenBranding={() => {
+            setRenewalOpen(false);
+            setBrandingOpen(true);
+          }}
+        />
+
+        <BrandingSettingsDialog open={brandingOpen} onOpenChange={setBrandingOpen} />
 
         <Toaster />
       </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
-import { CreditCard, Loader2 } from "lucide-react";
+import { CreditCard, Loader2, Palette } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,9 @@ interface RenewalSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   servers: IptvUserWithCheck[];
+  /** Abre o diálogo de "Marca do app" (white-label, p-1) — atalho a partir
+   * daqui, que é a central de config do provedor. */
+  onOpenBranding?: () => void;
 }
 
 const reaisToCents = (v: string) => Math.round(parseFloat(v.replace(",", ".")) * 100);
@@ -42,7 +45,12 @@ const tsToDate = (ts: number | null) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
-export function RenewalSettingsDialog({ open, onOpenChange, servers }: RenewalSettingsDialogProps) {
+export function RenewalSettingsDialog({
+  open,
+  onOpenChange,
+  servers,
+  onOpenBranding,
+}: RenewalSettingsDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [providerOk, setProviderOk] = useState(false);
@@ -286,13 +294,22 @@ export function RenewalSettingsDialog({ open, onOpenChange, servers }: RenewalSe
             </>
           )}
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={saving || loading}>
-              {saving && <Loader2 className="size-4 animate-spin" />} Salvar
-            </Button>
+          <DialogFooter className="gap-2 sm:justify-between">
+            {onOpenBranding ? (
+              <Button type="button" variant="ghost" onClick={onOpenBranding}>
+                <Palette className="size-4" /> Marca do app…
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={saving || loading}>
+                {saving && <Loader2 className="size-4 animate-spin" />} Salvar
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

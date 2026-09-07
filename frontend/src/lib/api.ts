@@ -479,6 +479,28 @@ export async function updateRenewalSettings(patch: RenewalSettingsPatch): Promis
   return handle<RenewalSettings>(res);
 }
 
+// White-label do Player (trilha do provedor p-1). name/logoUrl/accent vazios
+// = marca padrão ("HC IPTV" / laranja). O Player recebe isto pelo heartbeat.
+export interface BrandSettings {
+  name: string;
+  logoUrl: string;
+  accent: string;
+}
+
+export async function getBrandSettings(): Promise<BrandSettings> {
+  const res = await apiFetch("/settings/brand", { cache: "no-store" });
+  return handle<BrandSettings>(res);
+}
+
+export async function updateBrandSettings(patch: Partial<BrandSettings>): Promise<BrandSettings> {
+  const res = await apiFetch("/settings/brand", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return handle<BrandSettings>(res);
+}
+
 export interface DevicePayment {
   id: string;
   status: "pending" | "paid" | "expired" | "error" | "cancelled";
