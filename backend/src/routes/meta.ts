@@ -1,16 +1,14 @@
 import { Router, Request, Response } from "express";
-import { getMeta, putMeta, metaCacheKey, coerceMeta } from "../metaStore";
+import { getMeta, putMeta, metaCacheKey, coerceMeta, type MetaRecord } from "../metaStore";
+import { tmdbConfigured, enrichFromTmdb } from "../tmdb";
 
 // GET /api/meta?title=&year=&kind=  — metadados enriquecidos por título.
 //
-// FASE 0 (agora): só lê o cache (`tmdb_meta`). Se não tem nada, responde
-// `{ found:false, cached:false }` e o Player segue com o dado do painel — sem
-// buscar em lugar nenhum. Chamado pelo Player sem token (allow-list em
-// server.ts).
-//
-// FASE 2: aqui entra o fetch real no TMDB (chave em env `TMDB_API_KEY`),
-// grava no cache com `putMeta` e passa a devolver pôster HD / sinopse /
-// elenco / trailer.
+// Lê o cache (`tmdb_meta`). Em miss/stale e com `TMDB_API_KEY` configurado,
+// busca no TMDB, grava (`putMeta`) e devolve pôster HD / sinopse / elenco /
+// diretor / trailer / duração. Sem a chave, se comporta como na Fase 0 (só
+// cache; miss → `{found:false}` e o Player segue com o dado do painel).
+// Chamado pelo Player sem token (allow-list em server.ts).
 
 const router = Router();
 
@@ -19,6 +17,40 @@ const router = Router();
 // no TMDB depois.
 const TTL_HIT_MS = 30 * 24 * 60 * 60 * 1000;
 const TTL_MISS_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Dedupe de buscas concorrentes da mesma chave + teto de concorrência global
+// (proteção simples contra rajada — o TMDB permite ~50 req/s, e o uso é sob
+// demanda, mas um catálogo abrindo várias telas de uma vez não pode virar
+// rajada).
+const inFlight = new Map<string, Promise<MetaRecord>>();
+const MAX_INFLIGHT = 20;
+
+function kindOf(raw: unknown): "movie" | "tv" {
+  return raw === "tv" || raw === "series" ? "tv" : "movie";
+}
+
+async function fetchAndCache(
+  key: string,
+  title: string,
+  year: number | null,
+  kind: "movie" | "tv"
+): Promise<MetaRecord> {
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const run = (async () => {
+    const now = Date.now();
+    const enr = await enrichFromTmdb(title, year, kind);
+    // Grava até o miss (found:false) — não re-pergunta ao TMDB por TTL_MISS_MS.
+    const rec = coerceMeta({ ...enr, kind }, key, now);
+    return putMeta(rec).catch(() => rec);
+  })();
+  inFlight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    inFlight.delete(key);
+  }
+}
 
 router.get("/meta", async (req: Request, res: Response) => {
   const key = metaCacheKey(req.query.title, req.query.year, req.query.kind);
@@ -32,17 +64,29 @@ router.get("/meta", async (req: Request, res: Response) => {
     if (rec) {
       const ttl = rec.found ? TTL_HIT_MS : TTL_MISS_MS;
       const fresh = now - rec.fetchedAt < ttl;
-      res.json({ ...publicShape(rec), cached: true, stale: !fresh });
+      if (fresh || !tmdbConfigured() || inFlight.size >= MAX_INFLIGHT) {
+        res.json({ ...publicShape(rec), cached: true, stale: !fresh });
+        return;
+      }
+      // stale + tem chave + há folga → revalida no TMDB.
+    }
+
+    if (!tmdbConfigured() || inFlight.size >= MAX_INFLIGHT) {
+      res.json({
+        cacheKey: key,
+        found: false,
+        cached: false,
+        stale: true,
+        note: tmdbConfigured() ? "ocupado — tente de novo" : "sem enriquecimento — TMDB_API_KEY ausente",
+      });
       return;
     }
-    // Fase 0: nada em cache e nada pra buscar ainda.
-    res.json({
-      cacheKey: key,
-      found: false,
-      cached: false,
-      stale: true,
-      note: "sem enriquecimento — cache vazio (fetch do TMDB entra na Fase 2)",
-    });
+
+    const title = typeof req.query.title === "string" ? req.query.title : "";
+    const y = Number.parseInt(String(req.query.year ?? ""), 10);
+    const year = Number.isFinite(y) && y > 1870 && y < 2100 ? y : null;
+    const fresh = await fetchAndCache(key, title, year, kindOf(req.query.kind));
+    res.json({ ...publicShape(fresh), cached: false, stale: false });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro ao consultar metadados.";
     res.status(500).json({ error: message });

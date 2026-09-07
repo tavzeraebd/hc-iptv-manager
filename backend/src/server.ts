@@ -10,6 +10,7 @@ import metaRouter from "./routes/meta";
 import { adminAuth, portalTokenConfigured } from "./middleware/adminAuth";
 import { supabaseEnabled } from "./db/supabase";
 import { mpConfigured } from "./mercadopago";
+import { tmdbConfigured } from "./tmdb";
 
 // Rede de segurança: uma rejeição não tratada em qualquer handler async
 // (Express 4 não as captura) derrubaria o processo. Num portal hospedado isso
@@ -97,5 +98,8 @@ app.listen(PORT, HOST, () => {
   );
   console.log(
     `  pagamento (Mercado Pago): ${mpConfigured() ? "configurado" : "não configurado (MP_ACCESS_TOKEN ausente)"}`
+  );
+  console.log(
+    `  metadados (TMDB): ${tmdbConfigured() ? "configurado" : "não configurado (TMDB_API_KEY ausente)"}`
   );
 });
